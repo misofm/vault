@@ -1,0 +1,8 @@
+[package]
+name = "vault"
+edition = "2024"
+license = "Apache 2.0"
+authors = ["Miso Labs, Inc. (build@miso.network)"]
+
+[dependencies]
+miso = { git = "https://github.com/misonetwork/protocol.git", rev = "ecb3da52c14912e257f00b30185c598e92ffc5e3" }
