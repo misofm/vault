@@ -1,119 +1,89 @@
 # Security Model
 
-`Vault` can custody capabilities controlling high-value protocol objects. Its
-small API is intentional. This document defines what the package guarantees
-and which risks remain outside the onchain primitive.
+`Vault` can custody high-value capabilities. It is deliberately generic: it
+does not know what a `Cap` authorizes. Vault owners must therefore treat an
+authorized plugin as a delegate of the full custodied capability.
 
 ## Enforced onchain
 
-- The wrapped admin capability is a private field. No public API returns it or
-  a reference to it.
-- `Vault` has `key` but not `store`, so downstream packages cannot publicly
-  transfer, wrap, freeze, or share it. The defining module controls sharing and
-  destruction.
-- `VaultAdminCap<Cap>` is unforgeable and bound to one vault ID. It is required
-  to install or uninstall plugins and to destroy the vault.
-- A vault is permanently bound to the target object ID supplied to `new`.
-  Every `*_uid_mut` function rejects a different target before using the
-  wrapped cap.
-- Every `*_uid_mut` function requires an installed witness type and consumes
-  the witness by value before returning `&mut UID` to the calling Move code.
-- The vault cannot be destroyed while any plugin remains installed. Destruction
-  requires the matching `VaultAdminCap` and returns the exact wrapped cap.
+- `cap` is a private `sui::borrow::Referent<Cap>` field. No API exposes the
+  Referent or the Bag.
+- `borrow_as_plugin` consumes a witness and checks its private typed
+  `AuthorizedPluginKey<Witness>` record in the Bag.
+- `borrow_as_admin`, authorization, revocation, and destruction check a
+  vault-specific, unforgeable `VaultAdminCap`.
+- `Referent` returns `Cap` with a no-ability `Borrow` receipt. Sui verifies
+  the returned cap has the original object ID and returns to the originating
+  referent. An unfinished or substituted lease aborts atomically.
+- `Bag` tracks authorization records and can be destroyed only when empty.
+  Consequently, `destroy` cannot leave inaccessible authorization fields.
+- `Vault` has `key` but not `store`; only the defining module can share or
+  destroy it. `VaultAdminCap` has private fields and is bound to its vault ID.
 
-The three mutable-UID paths are `composition_uid_mut`, `recording_uid_mut`, and
-`release_uid_mut`. Each performs the same witness and target checks.
-The protocol's `release::uid_mut` additionally verifies the release ID embedded
-in `ReleaseAdminCap`. Composition and Recording authorization also relies on
-the protocol invariant that their share type uniquely identifies the object.
+`put_back` intentionally requires no administrator or plugin authorization.
+The hot-potato receipt itself is the authority to return the borrowed cap;
+adding a gate could strand the cap and create a liveness failure.
 
 ## Root authorities
 
-Treat each of these as full authority over the protected object:
+1. **The holder of `VaultAdminCap`.** It can authorize arbitrary plugin
+   witness types, revoke authorization, borrow the cap directly, or destroy an
+   empty vault and recover the cap.
+2. **Every authorized plugin package and its upgrade authority.** It can lease
+   the entire `Cap`, invoke every public operation that cap permits, and pass
+   it to other code during its transaction endpoint.
+3. **The custodied capability's defining package and its upgrade authority.**
+   Vault cannot strengthen the authorization rules implemented by `Cap`.
+4. **The Vault package `UpgradeCap` until immutability is finalized.**
 
-1. **`VaultAdminCap`.** Its holder can install arbitrary plugin witnesses,
-   revoke plugins, or destroy the empty vault and recover the wrapped cap.
-2. **Every installed plugin package and its `UpgradeCap`.** An installed plugin
-   receives root access to every dynamic field under the target UID. A malicious
-   plugin can mutate or remove another extension's fields when their keys are
-   constructible.
-3. **The pinned Miso protocol package.** The vault ultimately calls the
-   protocol's cap-gated UID accessors.
+Use multisig or equivalent governance for high-value `VaultAdminCap`s and
+upgrade authorities.
 
 ## Deployment immutability
 
-The vault has no application version or migration mechanism. Its security model
-requires the package to be permanently immutable: consume the vault package's
-`UpgradeCap` with `sui::package::make_immutable` in the publication transaction
-and verify its deletion onchain before depositing any admin capability. Until
-that has happened, the `UpgradeCap` holder is an additional root authority that
-can replace function implementations or add code with access to private vault
-fields.
+Vault is designed to have no upgrades. In the same publication transaction,
+consume its `UpgradeCap` with `sui::package::make_immutable`, then verify the
+cap's deletion onchain before depositing a valuable capability. Until then, an
+upgrade authority can alter Vault's private authorization logic.
 
-## Plugin upgrade identity
+Plugins should preferably also be immutable. If a plugin is upgradable, an
+authorization trusts its complete compatible-upgrade lineage. Sui
+`type_name::with_defining_ids<Witness>()` identifies the package version that
+first introduced the type; it does not pin the bytecode currently executing.
 
-The vault stores `type_name::with_defining_ids<Witness>()`. The defining ID is
-the package version that first introduced `Witness`; it is not the version of
-the code currently executing. The witness retains that identity through later
-package upgrades. Consequently, no `std::type_name` function can restrict an
-installation to the plugin's initial bytecode version.
+## Witness checks and their limits
 
-An immutable plugin package provides the strongest code guarantee. If a plugin
-is upgradable, clients must evaluate the owner and policy of its `UpgradeCap`
-and clearly disclose that installing it trusts future compatible code.
+`authorize_plugin` requires a `drop` witness whose type is exactly a
+non-generic `0xpkg::witness::Witness`. This prevents primitive, generic, and
+wrong-path types from being authorized.
 
-## Witness limitations
+The check cannot prove that Witness has only `drop`, that its constructor is
+package-only, or that the package has not exported another construction path.
+The Move compiler protects a properly written package-only constructor, but
+clients must verify the exact witness definition and all exported functions
+offchain before authorizing a plugin.
 
-The required plugin witness is:
+## Plugin endpoint policy
 
-```move
-module example_plugin::witness;
+Use `entry fun` for authority-bearing plugin endpoints whenever the plugin
+should not serve as a downstream Move authority trampoline. A plugin must not
+return the leased `Cap`, `Borrow`, a witness, or a privileged mutable reference.
+The lease and return should occur inside one plugin function.
 
-public struct Witness() has drop;
+## Offchain acceptance policy
 
-public(package) fun new(): Witness {
-    Witness()
-}
-```
+Plugin safety is a client or registry decision. A plugin should be rejected
+unless the reviewer can verify:
 
-The compiler prevents downstream packages from packing `Witness` or calling
-the package-only constructor. The vault additionally rejects primitives,
-generic types, and any type whose module and datatype are not exactly
-`witness::Witness`. Move can require `Witness: drop`, but it cannot express
-“drop and neither copy nor store.” The vault therefore cannot enforce the exact
-ability set or prevent a plugin package from exporting its witness. Those
-properties must be checked from verified source and bytecode before
-installation.
+- source matches deployed bytecode and the reviewed commit;
+- `witness::Witness` has exactly `drop`, its intended constructor is
+  `public(package)`, and no public construction path exists;
+- the plugin's full-capability operations are narrowly understood and every
+  dependency and upgrade authority is identified;
+- the plugin package's immutability, upgrade policy, owner, audits, tests, and
+  incidents are disclosed; and
+- its transaction endpoints do not leak capability authority or act as an
+  unintended public trampoline.
 
-Authority-bearing plugin endpoints should be `entry fun` and must never return
-the witness or `&mut UID`. A Move call in a PTB cannot return a reference, so
-the UID reference remains inside the calling Move function, but a composable
-plugin function can still act as an authority trampoline for other packages.
-
-## Client-side acceptance policy
-
-Plugin safety is an offchain policy decision. A client or registry should
-reject a plugin unless it can verify:
-
-- deployed bytecode matches published source;
-- the witness has exactly `drop`, a package-only constructor, and no public
-  export path;
-- every privileged operation is bounded, does not leak authority, and requests
-  only the object classes it needs;
-- all dependencies and their upgrade authorities are identified;
-- the plugin's `UpgradeCap` status, owner, and policy are disclosed;
-- audits, tests, known incidents, and the reviewed source commit are recorded.
-
-Miso's plugin registry maintains the detailed scoring proposal. Immutability
-should carry the largest weight, and unsafe witness construction should be a
-hard rejection rather than a low score.
-
-## Operational guidance
-
-- Custody `VaultAdminCap` with security at least as strong as the wrapped cap;
-  use multisig governance for high-value objects.
-- Review every plugin and its transitive dependencies before installation.
-- Re-evaluate scores and upgrade authorities continuously, not only at install.
-- Uninstall a plugin before a known-risk upgrade or incident.
-- Do not send unrelated objects to the vault or admin-cap object IDs; deleting
-  those parent objects can strand objects owned by their addresses.
+Immutability should be the largest factor in the corresponding plugin safety
+score. It is not an onchain substitute for source and bytecode review.

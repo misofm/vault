@@ -1,37 +1,43 @@
 # Vault
 
-> Capability custody and plugin authorization for Miso `Composition`,
-> `Recording`, and `Release` objects.
+`Vault<Cap>` is a small, protocol-agnostic custody primitive for any Sui
+capability with `key + store`. It makes the capability available only as a
+same-transaction, exact-return lease and lets a vault administrator authorize
+specific plugin packages to obtain that lease.
 
-`Vault<Cap>` wraps one protocol admin capability and stores the canonical type
-names of installed plugin witnesses. At creation it is permanently bound to
-one target object ID. Every plugin package defines exactly one
-`0xpkg::witness::Witness` type with only `drop`, constructed through a
-package-only `witness::new()`. The vault never exposes the wrapped cap. Instead,
-an installed plugin passes its witness by value to `composition_uid_mut`,
-`recording_uid_mut`, or `release_uid_mut`. The vault consumes the witness,
-verifies that its type is installed, and returns the corresponding protocol
-object's `&mut UID`. The target ID is checked before the wrapped cap is used.
+The package is intended to be immutable. Consume its `UpgradeCap` with
+`sui::package::make_immutable` in the publishing transaction before placing a
+high-value capability in a vault. There is intentionally no application
+versioning or migration API.
 
-The vault package is designed to be immutable. Its `UpgradeCap` must be
-consumed by `sui::package::make_immutable` when the package is published; there
-is intentionally no application version or migration mechanism.
+Read [SECURITY.md](./SECURITY.md) before use.
 
-Read [SECURITY.md](./SECURITY.md) before placing a high-value capability in a
-vault. In particular, installing an upgradable plugin trusts its entire package
-upgrade lineage; a `TypeName` cannot pin execution to reviewed bytecode.
+## Model
 
-## Dependency
-
-Pin the repository to a reviewed commit in consuming packages:
-
-```toml
-vault = { git = "https://github.com/misofm/vault.git", rev = "<commit>" }
+```move
+public struct Vault<Cap: key + store> has key {
+    id: UID,
+    cap: Referent<Cap>,
+    authorized_plugins: Bag,
+}
 ```
+
+`Referent<Cap>` returns `(Cap, Borrow)`. `Borrow` is a hot potato supplied by
+Sui: it must be consumed in the same transaction, and `put_back` checks both
+the exact capability object ID and the originating referent. `Bag` stores one
+typed dynamic-field record per authorized plugin:
+
+```move
+AuthorizedPluginKey<plugin::witness::Witness>() -> true
+```
+
+Only the vault module can construct `AuthorizedPluginKey`, and the Bag is not
+exposed mutably. Its `destroy_empty` invariant prevents destroying a vault that
+would strand authorization records.
 
 ## Plugin shape
 
-`sources/witness.move`:
+Every plugin package has `sources/witness.move`:
 
 ```move
 module example_plugin::witness;
@@ -43,67 +49,58 @@ public(package) fun new(): Witness {
 }
 ```
 
-`sources/example_plugin.move`:
+The vault validates this exact, non-generic `0xpkg::witness::Witness` shape
+when authorizing it. The package-local constructor lets its own modules make a
+witness while preventing downstream packages from doing so.
 
-```move
-module example_plugin::example_plugin;
-
-use example_plugin::witness;
-use miso::composition::{Composition, CompositionAdminCap};
-use vault::vault::{Vault, VaultAdminCap};
-
-entry fun install<CompositionShare>(
-    vault: &mut Vault<CompositionAdminCap<CompositionShare>>,
-    vault_admin_cap: &VaultAdminCap<CompositionAdminCap<CompositionShare>>,
-) {
-    vault.install_plugin(vault_admin_cap, witness::new())
-}
-
-entry fun execute<CompositionShare>(
-    vault: &Vault<CompositionAdminCap<CompositionShare>>,
-    composition: &mut Composition<CompositionShare>,
-) {
-    let uid = vault.composition_uid_mut(composition, witness::new());
-    // Perform the plugin's bounded business operation with `uid`.
-}
-```
-
-The constructor is available throughout the defining package but inaccessible
-to downstream packages. The vault rejects primitives, generic types, and any
-type whose path is not exactly `0xpkg::witness::Witness`. Move can require
-`Witness: drop`, but cannot express a negative constraint such as “and not
-`copy` or `store`,” so plugin packages must still declare `Witness` with exactly
-the `drop` ability.
-
-## Vault creation
-
-The target object is required by reference so the vault can bind its authority
-to that exact ID:
-
-```move
-let (vault, vault_admin_cap) = vault::new(
-    &composition,
-    composition_admin_cap,
-    ctx,
-);
-vault.share();
-```
-
-## Entry functions
-
-Authority-bearing plugin endpoints are good candidates for `entry fun`: this
-prevents another Move package from calling the endpoint as an authority
-trampoline. It is not required for every plugin function. Read-only functions
-and deliberately composable operations may remain `public`, provided they
-never return the witness, the wrapped cap, or the `&mut UID`.
+Move cannot express “`drop` and neither `copy` nor `store`,” nor can it prove
+that a plugin has not exported another witness constructor. Those are required
+offchain acceptance checks.
 
 ## Lifecycle
 
-- `new` binds the vault to a target object ID, wraps the admin cap, and returns
-  a vault-specific `VaultAdminCap`.
-- `share` shares the key-only vault through its defining module.
-- `install_plugin` requires both the vault admin cap and the plugin witness.
-- `uninstall_plugin` requires only the vault admin cap, so revocation never
-  depends on cooperation from the plugin package.
-- `destroy` requires every plugin to be uninstalled and returns the exact
-  wrapped protocol admin cap.
+```move
+let (vault, vault_admin_cap) = vault::new(composition_admin_cap, ctx);
+vault.share();
+```
+
+- `new` wraps one capability and returns a vault-specific `VaultAdminCap`.
+- `authorize_plugin` requires the admin cap and consumes the plugin witness.
+- `borrow_as_plugin` consumes an authorized witness and returns `(Cap, Borrow)`.
+- `borrow_as_admin` provides the same temporary lease to the admin cap holder.
+- `put_back` returns the lease; it requires no further authorization because
+  the hot potato itself proves the exact return.
+- `revoke_plugin` requires only the admin cap, allowing unilateral revocation.
+- `destroy` requires the matching admin cap and an empty Bag, then returns the
+  exact custodied capability.
+
+## Plugin usage
+
+For a Miso Composition plugin, the plugin—not Vault—uses the full admin cap to
+access the protocol’s extension surface:
+
+```move
+use miso::composition::{Composition, CompositionAdminCap};
+use vault::vault::{Self, Vault};
+
+entry fun execute<CompositionShare>(
+    vault: &mut Vault<CompositionAdminCap<CompositionShare>>,
+    composition: &mut Composition<CompositionShare>,
+) {
+    let (cap, receipt) = vault.borrow_as_plugin(witness::new());
+    let uid = composition.uid_mut(&cap);
+    // Perform this plugin's business operation with `uid`.
+    vault.put_back(cap, receipt);
+}
+```
+
+Installing a plugin delegates the full authority of `Cap` for the duration of
+each successful lease. A plugin registry should disclose and score that
+authority. Privileged plugin operations should generally be `entry fun`s so a
+plugin cannot become a composable authority trampoline.
+
+## Views
+
+`id`, `VaultAdminCap::vault_id`, `authorized_plugins_id`,
+`authorized_plugin_count`, and `is_plugin_authorized` are read-only. The Bag
+itself is never returned.
