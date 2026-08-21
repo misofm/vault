@@ -18,14 +18,11 @@ and which risks remain outside the onchain primitive.
   wrapped cap.
 - Every `*_uid_mut` function requires an installed witness type and consumes
   the witness by value before returning `&mut UID` to the calling Move code.
-- Vault state is versioned. Security-sensitive functions reject a vault state
-  version they do not understand, allowing a future migration to decommission
-  old package code for migrated vaults.
 - The vault cannot be destroyed while any plugin remains installed. Destruction
   requires the matching `VaultAdminCap` and returns the exact wrapped cap.
 
 The three mutable-UID paths are `composition_uid_mut`, `recording_uid_mut`, and
-`release_uid_mut`. Each performs the same version, witness, and target checks.
+`release_uid_mut`. Each performs the same witness and target checks.
 The protocol's `release::uid_mut` additionally verifies the release ID embedded
 in `ReleaseAdminCap`. Composition and Recording authorization also relies on
 the protocol invariant that their share type uniquely identifies the object.
@@ -36,20 +33,22 @@ Treat each of these as full authority over the protected object:
 
 1. **`VaultAdminCap`.** Its holder can install arbitrary plugin witnesses,
    revoke plugins, or destroy the empty vault and recover the wrapped cap.
-2. **The vault package `UpgradeCap`.** A compatible upgrade can change function
-   implementations or add new functions with access to private vault fields.
-   For high-value production deployment, make the package immutable or place
-   the `UpgradeCap` behind independently reviewed multisig/timelock governance.
-3. **Every installed plugin package and its `UpgradeCap`.** An installed plugin
+2. **Every installed plugin package and its `UpgradeCap`.** An installed plugin
    receives root access to every dynamic field under the target UID. A malicious
    plugin can mutate or remove another extension's fields when their keys are
    constructible.
-4. **The pinned Miso protocol package.** The vault ultimately calls the
+3. **The pinned Miso protocol package.** The vault ultimately calls the
    protocol's cap-gated UID accessors.
 
-Vault state versioning helps retire old code after a legitimate upgrade. It
-does not protect against a malicious holder of the vault package `UpgradeCap`,
-because upgraded code can omit the version check.
+## Deployment immutability
+
+The vault has no application version or migration mechanism. Its security model
+requires the package to be permanently immutable: consume the vault package's
+`UpgradeCap` with `sui::package::make_immutable` in the publication transaction
+and verify its deletion onchain before depositing any admin capability. Until
+that has happened, the `UpgradeCap` holder is an additional root authority that
+can replace function implementations or add code with access to private vault
+fields.
 
 ## Plugin upgrade identity
 

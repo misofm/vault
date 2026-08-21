@@ -11,8 +11,11 @@ package-only `witness::new()`. The vault never exposes the wrapped cap. Instead,
 an installed plugin passes its witness by value to `composition_uid_mut`,
 `recording_uid_mut`, or `release_uid_mut`. The vault consumes the witness,
 verifies that its type is installed, and returns the corresponding protocol
-object's `&mut UID`. The target ID and vault state version are checked before
-the wrapped cap is used.
+object's `&mut UID`. The target ID is checked before the wrapped cap is used.
+
+The vault package is designed to be immutable. Its `UpgradeCap` must be
+consumed by `sui::package::make_immutable` when the package is published; there
+is intentionally no application version or migration mechanism.
 
 Read [SECURITY.md](./SECURITY.md) before placing a high-value capability in a
 vault. In particular, installing an upgradable plugin trusts its entire package

@@ -19,8 +19,7 @@ const EPluginAlreadyInstalled: u64 = 1;
 const EPluginNotInstalled: u64 = 2;
 const EPluginsRemain: u64 = 3;
 const ETargetMismatch: u64 = 4;
-const EVaultVersionMismatch: u64 = 5;
-const EInvalidWitnessType: u64 = 6;
+const EInvalidWitnessType: u64 = 5;
 
 public struct OtherWitness() has drop;
 
@@ -71,7 +70,6 @@ fun shared_vault_can_be_administered_across_transactions() {
     let vault_admin_cap = scenario.take_from_sender<VaultAdminCap<TestAdminCap>>();
     install(&mut vault, &vault_admin_cap);
     assert!(vault.has_plugin<TestAdminCap, Witness>());
-    assert_eq!(vault.version(), 1);
     vault.uninstall_plugin<TestAdminCap, Witness>(&vault_admin_cap);
 
     let test_admin_cap = vault.destroy(vault_admin_cap);
@@ -351,20 +349,4 @@ fun generic_witness_type_cannot_be_installed() {
     destroy(vault);
     destroy(vault_admin_cap);
     destroy(composition);
-}
-
-#[test, expected_failure(abort_code = EVaultVersionMismatch, location = vault)]
-fun stale_vault_version_cannot_reach_uid() {
-    let ctx = &mut tx_context::dummy();
-    let (mut composition, mut vault, vault_admin_cap) = new_composition_vault(ctx);
-    install(&mut vault, &vault_admin_cap);
-    vault.set_version_for_testing(2);
-
-    vault.composition_uid_mut(&mut composition, witness::new());
-
-    vault.set_version_for_testing(1);
-    vault.uninstall_plugin<CompositionAdminCap<CompositionShare>, Witness>(&vault_admin_cap);
-    let composition_admin_cap = vault.destroy(vault_admin_cap);
-    destroy(composition);
-    destroy(composition_admin_cap);
 }

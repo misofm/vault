@@ -36,15 +36,8 @@ const EPluginNotInstalled: u64 = 2;
 const EPluginsRemain: u64 = 3;
 /// The supplied protocol object is not this vault's bound target.
 const ETargetMismatch: u64 = 4;
-/// The vault must be migrated before this package version can operate on it.
-const EVaultVersionMismatch: u64 = 5;
 /// Plugins must use the exact non-generic `0xpkg::witness::Witness` shape.
-const EInvalidWitnessType: u64 = 6;
-
-// === Constants ===
-
-/// State version understood by this package version.
-const VERSION: u64 = 1;
+const EInvalidWitnessType: u64 = 5;
 
 // === Structs ===
 
@@ -55,7 +48,6 @@ const VERSION: u64 = 1;
 /// public transfer functions.
 public struct Vault<Cap: key + store> has key {
     id: UID,
-    version: u64,
     target_id: ID,
     cap: Cap,
     plugins: VecSet<TypeName>,
@@ -75,7 +67,6 @@ public struct VaultCreated<phantom Cap> has copy, drop {
     vault_admin_cap_id: ID,
     wrapped_cap_id: ID,
     target_id: ID,
-    version: u64,
 }
 
 public struct PluginInstalled<phantom Cap, phantom Witness> has copy, drop {
@@ -115,13 +106,11 @@ public fun new<Target: key, Cap: key + store>(
         vault_admin_cap_id: vault_admin_cap.id.to_inner(),
         wrapped_cap_id,
         target_id,
-        version: VERSION,
     });
 
     (
         Vault {
             id: vault_id,
-            version: VERSION,
             target_id,
             cap,
             plugins: vec_set::empty(),
@@ -132,7 +121,6 @@ public fun new<Target: key, Cap: key + store>(
 
 /// Share a newly-created vault.
 public fun share<Cap: key + store>(vault: Vault<Cap>) {
-    vault.assert_current_version();
     transfer::share_object(vault)
 }
 
@@ -141,11 +129,10 @@ public fun destroy<Cap: key + store>(
     self: Vault<Cap>,
     admin_cap: VaultAdminCap<Cap>,
 ): Cap {
-    self.assert_current_version();
     self.assert_admin(&admin_cap);
     assert!(self.plugins.is_empty(), EPluginsRemain);
 
-    let Vault { id, version: _, target_id: _, cap, plugins: _ } = self;
+    let Vault { id, cap, .. } = self;
     let VaultAdminCap { id: admin_cap_id, vault_id } = admin_cap;
     let wrapped_cap_id = object::id(&cap);
     id.delete();
@@ -166,7 +153,6 @@ public fun install_plugin<Cap: key + store, Witness: drop>(
     admin_cap: &VaultAdminCap<Cap>,
     _: Witness,
 ) {
-    self.assert_current_version();
     self.assert_admin(admin_cap);
     let witness = witness_type<Witness>();
     assert!(!self.plugins.contains(&witness), EPluginAlreadyInstalled);
@@ -180,7 +166,6 @@ public fun uninstall_plugin<Cap: key + store, Witness: drop>(
     self: &mut Vault<Cap>,
     admin_cap: &VaultAdminCap<Cap>,
 ) {
-    self.assert_current_version();
     self.assert_admin(admin_cap);
     let witness = witness_type<Witness>();
     assert!(self.plugins.contains(&witness), EPluginNotInstalled);
@@ -232,10 +217,6 @@ public fun id<Cap: key + store>(self: &Vault<Cap>): ID {
     self.id.to_inner()
 }
 
-public fun version<Cap: key + store>(self: &Vault<Cap>): u64 {
-    self.version
-}
-
 public fun wrapped_cap_id<Cap: key + store>(self: &Vault<Cap>): ID {
     object::id(&self.cap)
 }
@@ -274,10 +255,6 @@ fun witness_type<Witness: drop>(): TypeName {
     witness
 }
 
-fun assert_current_version<Cap: key + store>(self: &Vault<Cap>) {
-    assert!(self.version == VERSION, EVaultVersionMismatch)
-}
-
 fun assert_target<Cap: key + store>(self: &Vault<Cap>, target_id: ID) {
     assert!(self.target_id == target_id, ETargetMismatch)
 }
@@ -293,11 +270,5 @@ fun assert_installed<Cap: key + store, Witness: drop>(
     self: &Vault<Cap>,
     _: Witness,
 ) {
-    self.assert_current_version();
     assert!(self.plugins.contains(&witness_type<Witness>()), EPluginNotInstalled)
-}
-
-#[test_only]
-public fun set_version_for_testing<Cap: key + store>(self: &mut Vault<Cap>, version: u64) {
-    self.version = version
 }
