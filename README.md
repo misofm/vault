@@ -4,13 +4,19 @@
 > `Recording`, and `Release` objects.
 
 `Vault<Cap>` wraps one protocol admin capability and stores the canonical type
-names of installed plugin witnesses. Every plugin package defines exactly one
+names of installed plugin witnesses. At creation it is permanently bound to
+one target object ID. Every plugin package defines exactly one
 `0xpkg::witness::Witness` type with only `drop`, constructed through a
 package-only `witness::new()`. The vault never exposes the wrapped cap. Instead,
 an installed plugin passes its witness by value to `composition_uid_mut`,
 `recording_uid_mut`, or `release_uid_mut`. The vault consumes the witness,
 verifies that its type is installed, and returns the corresponding protocol
-object's `&mut UID`.
+object's `&mut UID`. The target ID and vault state version are checked before
+the wrapped cap is used.
+
+Read [SECURITY.md](./SECURITY.md) before placing a high-value capability in a
+vault. In particular, installing an upgradable plugin trusts its entire package
+upgrade lineage; a `TypeName` cannot pin execution to reviewed bytecode.
 
 ## Dependency
 
@@ -60,9 +66,25 @@ entry fun execute<CompositionShare>(
 ```
 
 The constructor is available throughout the defining package but inaccessible
-to downstream packages. Move can require `Witness: drop`, but cannot express a
-negative constraint such as “and not `copy` or `store`,” so plugin packages must
-declare `Witness` with exactly the `drop` ability.
+to downstream packages. The vault rejects primitives, generic types, and any
+type whose path is not exactly `0xpkg::witness::Witness`. Move can require
+`Witness: drop`, but cannot express a negative constraint such as “and not
+`copy` or `store`,” so plugin packages must still declare `Witness` with exactly
+the `drop` ability.
+
+## Vault creation
+
+The target object is required by reference so the vault can bind its authority
+to that exact ID:
+
+```move
+let (vault, vault_admin_cap) = vault::new(
+    &composition,
+    composition_admin_cap,
+    ctx,
+);
+vault.share();
+```
 
 ## Entry functions
 
@@ -74,7 +96,8 @@ never return the witness, the wrapped cap, or the `&mut UID`.
 
 ## Lifecycle
 
-- `new` returns the vault and a vault-specific `VaultAdminCap`.
+- `new` binds the vault to a target object ID, wraps the admin cap, and returns
+  a vault-specific `VaultAdminCap`.
 - `share` shares the key-only vault through its defining module.
 - `install_plugin` requires both the vault admin cap and the plugin witness.
 - `uninstall_plugin` requires only the vault admin cap, so revocation never

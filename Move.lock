@@ -22,6 +22,12 @@ use_environment = "testnet"
 manifest_digest = "5745706258F61D6CE210904B3E6AE87A73CE9D31A6F93BE4718C442529332A87"
 deps = { std = "MoveStdlib", sui = "Sui" }
 
+[pinned.testnet.generic_witness]
+source = { local = "test_packages/generic_witness" }
+use_environment = "testnet"
+manifest_digest = "5745706258F61D6CE210904B3E6AE87A73CE9D31A6F93BE4718C442529332A87"
+deps = { std = "MoveStdlib", sui = "Sui" }
+
 [pinned.testnet.miso]
 source = { git = "https://github.com/misonetwork/protocol.git", subdir = ".", rev = "ecb3da52c14912e257f00b30185c598e92ffc5e3" }
 use_environment = "testnet"
@@ -37,5 +43,5 @@ deps = { std = "MoveStdlib", sui = "Sui" }
 [pinned.testnet.vault]
 source = { root = true }
 use_environment = "testnet"
-manifest_digest = "AE067A3F8CD2625E3119EBC3C53F961D098BC0A71D71418F4E8E1CE76B984F9F"
-deps = { miso = "miso", std = "MoveStdlib", sui = "Sui" }
+manifest_digest = "DB417D1CD62F0A7B43473282C43B53F79B26FF00247BA2E4D520C08E134D4C65"
+deps = { generic_witness = "generic_witness", miso = "miso", std = "MoveStdlib", sui = "Sui" }

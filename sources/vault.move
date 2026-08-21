@@ -3,8 +3,9 @@
 
 /// Capability custody and plugin authorization for Miso protocol objects.
 ///
-/// A `Vault<Cap>` wraps one protocol admin capability and records the canonical
-/// `0xpkg::witness::Witness` types of the plugins installed against it. An
+/// A `Vault<Cap>` binds one target object ID, wraps one protocol admin
+/// capability, and records the canonical `0xpkg::witness::Witness` types of
+/// the plugins installed against it. An
 /// installed plugin proves its authority by calling its package-only
 /// `witness::new()` and passing the resulting drop-only witness by value to one
 /// of the `*_uid_mut` functions. That function consumes the witness, verifies
@@ -33,6 +34,17 @@ const EPluginAlreadyInstalled: u64 = 1;
 const EPluginNotInstalled: u64 = 2;
 /// Every plugin must be uninstalled before the vault can be destroyed.
 const EPluginsRemain: u64 = 3;
+/// The supplied protocol object is not this vault's bound target.
+const ETargetMismatch: u64 = 4;
+/// The vault must be migrated before this package version can operate on it.
+const EVaultVersionMismatch: u64 = 5;
+/// Plugins must use the exact non-generic `0xpkg::witness::Witness` shape.
+const EInvalidWitnessType: u64 = 6;
+
+// === Constants ===
+
+/// State version understood by this package version.
+const VERSION: u64 = 1;
 
 // === Structs ===
 
@@ -43,6 +55,8 @@ const EPluginsRemain: u64 = 3;
 /// public transfer functions.
 public struct Vault<Cap: key + store> has key {
     id: UID,
+    version: u64,
+    target_id: ID,
     cap: Cap,
     plugins: VecSet<TypeName>,
 }
@@ -59,6 +73,9 @@ public struct VaultAdminCap<phantom Cap: key + store> has key, store {
 public struct VaultCreated<phantom Cap> has copy, drop {
     vault_id: ID,
     vault_admin_cap_id: ID,
+    wrapped_cap_id: ID,
+    target_id: ID,
+    version: u64,
 }
 
 public struct PluginInstalled<phantom Cap, phantom Witness> has copy, drop {
@@ -71,19 +88,23 @@ public struct PluginUninstalled<phantom Cap, phantom Witness> has copy, drop {
 
 public struct VaultDestroyed<phantom Cap> has copy, drop {
     vault_id: ID,
+    wrapped_cap_id: ID,
 }
 
 // === Lifecycle ===
 
-/// Wrap an admin capability and return the vault with its own admin cap.
-/// The caller decides whether to share the vault and where to transfer the
+/// Bind an admin capability to `target` and return the vault with its own admin
+/// cap. The caller decides whether to share the vault and where to transfer the
 /// returned `VaultAdminCap`.
-public fun new<Cap: key + store>(
+public fun new<Target: key, Cap: key + store>(
+    target: &Target,
     cap: Cap,
     ctx: &mut TxContext,
 ): (Vault<Cap>, VaultAdminCap<Cap>) {
     let vault_id = object::new(ctx);
     let vault_id_value = vault_id.to_inner();
+    let wrapped_cap_id = object::id(&cap);
+    let target_id = object::id(target);
     let vault_admin_cap = VaultAdminCap<Cap> {
         id: object::new(ctx),
         vault_id: vault_id_value,
@@ -92,11 +113,16 @@ public fun new<Cap: key + store>(
     emit(VaultCreated<Cap> {
         vault_id: vault_id_value,
         vault_admin_cap_id: vault_admin_cap.id.to_inner(),
+        wrapped_cap_id,
+        target_id,
+        version: VERSION,
     });
 
     (
         Vault {
             id: vault_id,
+            version: VERSION,
+            target_id,
             cap,
             plugins: vec_set::empty(),
         },
@@ -106,6 +132,7 @@ public fun new<Cap: key + store>(
 
 /// Share a newly-created vault.
 public fun share<Cap: key + store>(vault: Vault<Cap>) {
+    vault.assert_current_version();
     transfer::share_object(vault)
 }
 
@@ -114,14 +141,16 @@ public fun destroy<Cap: key + store>(
     self: Vault<Cap>,
     admin_cap: VaultAdminCap<Cap>,
 ): Cap {
+    self.assert_current_version();
     self.assert_admin(&admin_cap);
     assert!(self.plugins.is_empty(), EPluginsRemain);
 
-    let Vault { id, cap, plugins: _ } = self;
+    let Vault { id, version: _, target_id: _, cap, plugins: _ } = self;
     let VaultAdminCap { id: admin_cap_id, vault_id } = admin_cap;
+    let wrapped_cap_id = object::id(&cap);
     id.delete();
     admin_cap_id.delete();
-    emit(VaultDestroyed<Cap> { vault_id });
+    emit(VaultDestroyed<Cap> { vault_id, wrapped_cap_id });
     cap
 }
 
@@ -137,6 +166,7 @@ public fun install_plugin<Cap: key + store, Witness: drop>(
     admin_cap: &VaultAdminCap<Cap>,
     _: Witness,
 ) {
+    self.assert_current_version();
     self.assert_admin(admin_cap);
     let witness = witness_type<Witness>();
     assert!(!self.plugins.contains(&witness), EPluginAlreadyInstalled);
@@ -150,6 +180,7 @@ public fun uninstall_plugin<Cap: key + store, Witness: drop>(
     self: &mut Vault<Cap>,
     admin_cap: &VaultAdminCap<Cap>,
 ) {
+    self.assert_current_version();
     self.assert_admin(admin_cap);
     let witness = witness_type<Witness>();
     assert!(self.plugins.contains(&witness), EPluginNotInstalled);
@@ -167,6 +198,7 @@ public fun composition_uid_mut<CompositionShare, Witness: drop>(
     witness: Witness,
 ): &mut UID {
     self.assert_installed(witness);
+    self.assert_target(composition.id());
     composition.uid_mut(&self.cap)
 }
 
@@ -178,6 +210,7 @@ public fun recording_uid_mut<RecordingShare, CompositionShare, Witness: drop>(
     witness: Witness,
 ): &mut UID {
     self.assert_installed(witness);
+    self.assert_target(recording.id());
     recording.uid_mut(&self.cap)
 }
 
@@ -189,6 +222,7 @@ public fun release_uid_mut<Witness: drop>(
     witness: Witness,
 ): &mut UID {
     self.assert_installed(witness);
+    self.assert_target(release.id());
     release.uid_mut(&self.cap)
 }
 
@@ -196,6 +230,18 @@ public fun release_uid_mut<Witness: drop>(
 
 public fun id<Cap: key + store>(self: &Vault<Cap>): ID {
     self.id.to_inner()
+}
+
+public fun version<Cap: key + store>(self: &Vault<Cap>): u64 {
+    self.version
+}
+
+public fun wrapped_cap_id<Cap: key + store>(self: &Vault<Cap>): ID {
+    object::id(&self.cap)
+}
+
+public fun target_id<Cap: key + store>(self: &Vault<Cap>): ID {
+    self.target_id
 }
 
 public fun vault_id<Cap: key + store>(self: &VaultAdminCap<Cap>): ID {
@@ -213,9 +259,27 @@ public fun has_plugin<Cap: key + store, Witness: drop>(self: &Vault<Cap>): bool 
 // === Private helpers ===
 
 fun witness_type<Witness: drop>(): TypeName {
-    // Original IDs keep an installed plugin stable across compatible package
-    // upgrades instead of treating each upgraded package version as a new one.
-    type_name::with_original_ids<Witness>()
+    // The defining ID is the package version that first introduced Witness.
+    // The type retains this identity across later upgrades, so installation
+    // trusts the plugin's upgrade lineage rather than one bytecode version.
+    let witness = type_name::with_defining_ids<Witness>();
+    assert!(!witness.is_primitive(), EInvalidWitnessType);
+    assert!(witness.module_string().as_bytes() == &b"witness", EInvalidWitnessType);
+    assert!(witness.datatype_string().as_bytes() == &b"Witness", EInvalidWitnessType);
+    let type_parameters = b"<".to_ascii_string();
+    assert!(
+        witness.as_string().index_of(&type_parameters) == witness.as_string().length(),
+        EInvalidWitnessType,
+    );
+    witness
+}
+
+fun assert_current_version<Cap: key + store>(self: &Vault<Cap>) {
+    assert!(self.version == VERSION, EVaultVersionMismatch)
+}
+
+fun assert_target<Cap: key + store>(self: &Vault<Cap>, target_id: ID) {
+    assert!(self.target_id == target_id, ETargetMismatch)
 }
 
 fun assert_admin<Cap: key + store>(
@@ -229,5 +293,11 @@ fun assert_installed<Cap: key + store, Witness: drop>(
     self: &Vault<Cap>,
     _: Witness,
 ) {
+    self.assert_current_version();
     assert!(self.plugins.contains(&witness_type<Witness>()), EPluginNotInstalled)
+}
+
+#[test_only]
+public fun set_version_for_testing<Cap: key + store>(self: &mut Vault<Cap>, version: u64) {
+    self.version = version
 }

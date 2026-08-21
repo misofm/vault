@@ -1,0 +1,3 @@
+[package]
+name = "generic_witness"
+edition = "2024"
