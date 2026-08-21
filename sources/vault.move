@@ -1,130 +1,110 @@
 // Copyright (c) Miso Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-/// Capability custody and plugin authorization for Miso protocol objects.
+/// Generic capability custody and plugin authorization.
 ///
-/// A `Vault<Cap>` binds one target object ID, wraps one protocol admin
-/// capability, and records the canonical `0xpkg::witness::Witness` types of
-/// the plugins installed against it. An
-/// installed plugin proves its authority by calling its package-only
-/// `witness::new()` and passing the resulting drop-only witness by value to one
-/// of the `*_uid_mut` functions. That function consumes the witness, verifies
-/// its type, and returns the host object's `&mut UID` without ever exposing the
-/// wrapped admin capability.
-///
-/// Plugin packages should keep witness construction private. Their operational
-/// transaction endpoints may be `entry fun`s when deliberately preventing
-/// downstream Move packages from using the plugin as an authority trampoline.
+/// `Vault<Cap>` holds a capability in a Sui `Referent`. An authorized plugin
+/// receives the whole capability temporarily, paired with a hot-potato
+/// `Borrow` receipt that forces the same capability back into the same vault
+/// before the transaction can finish. Plugin authorization is represented by a
+/// typed dynamic field in the vault's `Bag`.
 module vault::vault;
 
-use miso::composition::{Composition, CompositionAdminCap};
-use miso::recording::{Recording, RecordingAdminCap};
-use miso::release::{Release, ReleaseAdminCap};
 use std::type_name::{Self, TypeName};
+use sui::bag::{Self, Bag};
+use sui::borrow::{Self, Borrow, Referent};
 use sui::event::emit;
-use sui::vec_set::{Self, VecSet};
 
 // === Errors ===
 
 /// The supplied vault admin capability belongs to a different vault.
 const ENotVaultAdmin: u64 = 0;
-/// A plugin with this witness type is already installed.
-const EPluginAlreadyInstalled: u64 = 1;
-/// No plugin with this witness type is installed.
-const EPluginNotInstalled: u64 = 2;
-/// Every plugin must be uninstalled before the vault can be destroyed.
+/// A plugin with this witness type is already authorized.
+const EPluginAlreadyAuthorized: u64 = 1;
+/// No authorization exists for this plugin witness type.
+const EPluginNotAuthorized: u64 = 2;
+/// Every plugin authorization must be revoked before the vault can be destroyed.
 const EPluginsRemain: u64 = 3;
-/// The supplied protocol object is not this vault's bound target.
-const ETargetMismatch: u64 = 4;
-/// The vault must be migrated before this package version can operate on it.
-const EVaultVersionMismatch: u64 = 5;
 /// Plugins must use the exact non-generic `0xpkg::witness::Witness` shape.
-const EInvalidWitnessType: u64 = 6;
-
-// === Constants ===
-
-/// State version understood by this package version.
-const VERSION: u64 = 1;
+const EInvalidWitnessType: u64 = 4;
 
 // === Structs ===
 
-/// Custodies a protocol admin capability and the installed plugin type names.
+/// Custodies one capability and the typed authorization records for plugins.
 ///
-/// `Vault` intentionally lacks `store`: sharing and destruction remain under
-/// this module's explicit API instead of being generally available through the
-/// public transfer functions.
+/// `Vault` intentionally lacks `store`: only this module can share or destroy
+/// it. The wrapped capability is never exposed except through a hot-potato
+/// borrow that requires its exact return.
 public struct Vault<Cap: key + store> has key {
     id: UID,
-    version: u64,
-    target_id: ID,
-    cap: Cap,
-    plugins: VecSet<TypeName>,
+    cap: Referent<Cap>,
+    authorized_plugins: Bag,
 }
 
-/// Authorizes installing and uninstalling plugins and recovering the wrapped
-/// protocol admin capability from one particular vault.
+/// Authorizes administration and direct administrative borrowing for one vault.
 public struct VaultAdminCap<phantom Cap: key + store> has key, store {
     id: UID,
     vault_id: ID,
 }
 
+/// The typed key for a plugin authorization record.
+///
+/// Its fields are private, so only this module can create a key. `Witness` is
+/// phantom: every witness type produces a distinct dynamic-field name without
+/// storing a witness value.
+public struct AuthorizedPluginKey<phantom Witness: drop>() has copy, drop, store;
+
 // === Events ===
 
-public struct VaultCreated<phantom Cap> has copy, drop {
+public struct VaultCreatedEvent<phantom Cap> has copy, drop {
     vault_id: ID,
     vault_admin_cap_id: ID,
     wrapped_cap_id: ID,
-    target_id: ID,
-    version: u64,
+    authorized_plugins_id: ID,
 }
 
-public struct PluginInstalled<phantom Cap, phantom Witness> has copy, drop {
+public struct PluginAuthorizedEvent<phantom Cap, phantom Witness> has copy, drop {
     vault_id: ID,
 }
 
-public struct PluginUninstalled<phantom Cap, phantom Witness> has copy, drop {
+public struct PluginRevokedEvent<phantom Cap, phantom Witness> has copy, drop {
     vault_id: ID,
 }
 
-public struct VaultDestroyed<phantom Cap> has copy, drop {
+public struct VaultDestroyedEvent<phantom Cap> has copy, drop {
     vault_id: ID,
     wrapped_cap_id: ID,
 }
 
 // === Lifecycle ===
 
-/// Bind an admin capability to `target` and return the vault with its own admin
-/// cap. The caller decides whether to share the vault and where to transfer the
-/// returned `VaultAdminCap`.
-public fun new<Target: key, Cap: key + store>(
-    target: &Target,
+/// Custody `cap` and create its vault-specific administrator capability.
+public fun new<Cap: key + store>(
     cap: Cap,
     ctx: &mut TxContext,
 ): (Vault<Cap>, VaultAdminCap<Cap>) {
     let vault_id = object::new(ctx);
     let vault_id_value = vault_id.to_inner();
     let wrapped_cap_id = object::id(&cap);
-    let target_id = object::id(target);
+    let authorized_plugins = bag::new(ctx);
+    let authorized_plugins_id = object::id(&authorized_plugins);
     let vault_admin_cap = VaultAdminCap<Cap> {
         id: object::new(ctx),
         vault_id: vault_id_value,
     };
 
-    emit(VaultCreated<Cap> {
+    emit(VaultCreatedEvent<Cap> {
         vault_id: vault_id_value,
         vault_admin_cap_id: vault_admin_cap.id.to_inner(),
         wrapped_cap_id,
-        target_id,
-        version: VERSION,
+        authorized_plugins_id,
     });
 
     (
         Vault {
             id: vault_id,
-            version: VERSION,
-            target_id,
-            cap,
-            plugins: vec_set::empty(),
+            cap: borrow::new(cap, ctx),
+            authorized_plugins,
         },
         vault_admin_cap,
     )
@@ -132,98 +112,105 @@ public fun new<Target: key, Cap: key + store>(
 
 /// Share a newly-created vault.
 public fun share<Cap: key + store>(vault: Vault<Cap>) {
-    vault.assert_current_version();
     transfer::share_object(vault)
 }
 
-/// Destroy an empty vault and recover the exact admin capability it wrapped.
+/// Destroy an empty vault and return the exact capability it custodied.
 public fun destroy<Cap: key + store>(
     self: Vault<Cap>,
     admin_cap: VaultAdminCap<Cap>,
 ): Cap {
-    self.assert_current_version();
     self.assert_admin(&admin_cap);
-    assert!(self.plugins.is_empty(), EPluginsRemain);
+    assert!(bag::is_empty(&self.authorized_plugins), EPluginsRemain);
 
-    let Vault { id, version: _, target_id: _, cap, plugins: _ } = self;
-    let VaultAdminCap { id: admin_cap_id, vault_id } = admin_cap;
+    let Vault {
+        id,
+        cap,
+        authorized_plugins,
+    } = self;
+    let VaultAdminCap {
+        id: admin_cap_id,
+        vault_id,
+    } = admin_cap;
+    let cap = borrow::destroy(cap);
     let wrapped_cap_id = object::id(&cap);
+    authorized_plugins.destroy_empty();
     id.delete();
     admin_cap_id.delete();
-    emit(VaultDestroyed<Cap> { vault_id, wrapped_cap_id });
+    emit(VaultDestroyedEvent<Cap> { vault_id, wrapped_cap_id });
     cap
 }
 
-// === Plugin administration ===
+// === Plugin authorization ===
 
-/// Install the plugin identified by its canonical `witness::Witness` type.
+/// Authorize the package identified by its canonical `witness::Witness` type.
 ///
-/// The witness is received by value and dropped here. A plugin package should
-/// expose an installation endpoint that constructs its private witness and
-/// calls this function; the vault owner must participate with `admin_cap`.
-public fun install_plugin<Cap: key + store, Witness: drop>(
+/// The witness is consumed here. A plugin should construct it with a
+/// package-only `witness::new()` function.
+public fun authorize_plugin<Cap: key + store, Witness: drop>(
     self: &mut Vault<Cap>,
     admin_cap: &VaultAdminCap<Cap>,
     _: Witness,
 ) {
-    self.assert_current_version();
     self.assert_admin(admin_cap);
-    let witness = witness_type<Witness>();
-    assert!(!self.plugins.contains(&witness), EPluginAlreadyInstalled);
-    self.plugins.insert(witness);
-    emit(PluginInstalled<Cap, Witness> { vault_id: self.id() });
+    let _ = witness_type<Witness>();
+    let key = AuthorizedPluginKey<Witness>();
+    assert!(
+        !bag::contains(&self.authorized_plugins, key),
+        EPluginAlreadyAuthorized,
+    );
+    bag::add(&mut self.authorized_plugins, key, true);
+    emit(PluginAuthorizedEvent<Cap, Witness> { vault_id: self.id() });
 }
 
-/// Uninstall a plugin. No witness is required so the vault owner can always
-/// revoke a plugin without cooperation from that plugin's package.
-public fun uninstall_plugin<Cap: key + store, Witness: drop>(
+/// Revoke a plugin authorization without requiring cooperation from the plugin.
+public fun revoke_plugin<Cap: key + store, Witness: drop>(
     self: &mut Vault<Cap>,
     admin_cap: &VaultAdminCap<Cap>,
 ) {
-    self.assert_current_version();
     self.assert_admin(admin_cap);
-    let witness = witness_type<Witness>();
-    assert!(self.plugins.contains(&witness), EPluginNotInstalled);
-    self.plugins.remove(&witness);
-    emit(PluginUninstalled<Cap, Witness> { vault_id: self.id() });
+    let key = AuthorizedPluginKey<Witness>();
+    assert!(bag::contains(&self.authorized_plugins, key), EPluginNotAuthorized);
+    let _: bool = bag::remove(&mut self.authorized_plugins, key);
+    emit(PluginRevokedEvent<Cap, Witness> { vault_id: self.id() });
 }
 
-// === Protocol authority ===
+// === Capability borrowing ===
 
-/// Return the composition's extension surface to an installed plugin.
-/// `witness` is consumed in this function before the reference is returned.
-public fun composition_uid_mut<CompositionShare, Witness: drop>(
-    self: &Vault<CompositionAdminCap<CompositionShare>>,
-    composition: &mut Composition<CompositionShare>,
-    witness: Witness,
-): &mut UID {
-    self.assert_installed(witness);
-    self.assert_target(composition.id());
-    composition.uid_mut(&self.cap)
+/// Temporarily lend the full custodied capability to an authorized plugin.
+///
+/// `Borrow` has no abilities, so the exact capability must be returned through
+/// `put_back` in this transaction.
+public fun borrow_as_plugin<Cap: key + store, Witness: drop>(
+    self: &mut Vault<Cap>,
+    _: Witness,
+): (Cap, Borrow) {
+    assert!(
+        bag::contains(&self.authorized_plugins, AuthorizedPluginKey<Witness>()),
+        EPluginNotAuthorized,
+    );
+    borrow::borrow(&mut self.cap)
 }
 
-/// Return the recording's extension surface to an installed plugin.
-/// `witness` is consumed in this function before the reference is returned.
-public fun recording_uid_mut<RecordingShare, CompositionShare, Witness: drop>(
-    self: &Vault<RecordingAdminCap<RecordingShare>>,
-    recording: &mut Recording<RecordingShare, CompositionShare>,
-    witness: Witness,
-): &mut UID {
-    self.assert_installed(witness);
-    self.assert_target(recording.id());
-    recording.uid_mut(&self.cap)
+/// Temporarily lend the full custodied capability to the vault administrator.
+public fun borrow_as_admin<Cap: key + store>(
+    self: &mut Vault<Cap>,
+    admin_cap: &VaultAdminCap<Cap>,
+): (Cap, Borrow) {
+    self.assert_admin(admin_cap);
+    borrow::borrow(&mut self.cap)
 }
 
-/// Return the release's extension surface to an installed plugin.
-/// `witness` is consumed in this function before the reference is returned.
-public fun release_uid_mut<Witness: drop>(
-    self: &Vault<ReleaseAdminCap>,
-    release: &mut Release,
-    witness: Witness,
-): &mut UID {
-    self.assert_installed(witness);
-    self.assert_target(release.id());
-    release.uid_mut(&self.cap)
+/// Return the exact capability borrowed from this vault.
+///
+/// No additional authorization is required: `Borrow` proves the originating
+/// referent and capability object ID, and blocking return would harm liveness.
+public fun put_back<Cap: key + store>(
+    self: &mut Vault<Cap>,
+    cap: Cap,
+    receipt: Borrow,
+) {
+    borrow::put_back(&mut self.cap, cap, receipt)
 }
 
 // === Views ===
@@ -232,36 +219,33 @@ public fun id<Cap: key + store>(self: &Vault<Cap>): ID {
     self.id.to_inner()
 }
 
-public fun version<Cap: key + store>(self: &Vault<Cap>): u64 {
-    self.version
-}
-
-public fun wrapped_cap_id<Cap: key + store>(self: &Vault<Cap>): ID {
-    object::id(&self.cap)
-}
-
-public fun target_id<Cap: key + store>(self: &Vault<Cap>): ID {
-    self.target_id
-}
-
 public fun vault_id<Cap: key + store>(self: &VaultAdminCap<Cap>): ID {
     self.vault_id
 }
 
-public fun plugins<Cap: key + store>(self: &Vault<Cap>): &VecSet<TypeName> {
-    &self.plugins
+/// The ID under which `AuthorizedPluginKey` records are dynamic fields.
+public fun authorized_plugins_id<Cap: key + store>(self: &Vault<Cap>): ID {
+    object::id(&self.authorized_plugins)
 }
 
-public fun has_plugin<Cap: key + store, Witness: drop>(self: &Vault<Cap>): bool {
-    self.plugins.contains(&witness_type<Witness>())
+public fun authorized_plugin_count<Cap: key + store>(self: &Vault<Cap>): u64 {
+    bag::length(&self.authorized_plugins)
+}
+
+/// Returns whether this witness type has an authorization record.
+///
+/// This deliberately does not validate the witness shape: arbitrary types
+/// simply report false, while `authorize_plugin` is the only way to add one.
+public fun is_plugin_authorized<Cap: key + store, Witness: drop>(self: &Vault<Cap>): bool {
+    bag::contains(&self.authorized_plugins, AuthorizedPluginKey<Witness>())
 }
 
 // === Private helpers ===
 
 fun witness_type<Witness: drop>(): TypeName {
     // The defining ID is the package version that first introduced Witness.
-    // The type retains this identity across later upgrades, so installation
-    // trusts the plugin's upgrade lineage rather than one bytecode version.
+    // It persists through compatible plugin upgrades, so this validates a
+    // package lineage rather than a single bytecode version.
     let witness = type_name::with_defining_ids<Witness>();
     assert!(!witness.is_primitive(), EInvalidWitnessType);
     assert!(witness.module_string().as_bytes() == &b"witness", EInvalidWitnessType);
@@ -274,30 +258,9 @@ fun witness_type<Witness: drop>(): TypeName {
     witness
 }
 
-fun assert_current_version<Cap: key + store>(self: &Vault<Cap>) {
-    assert!(self.version == VERSION, EVaultVersionMismatch)
-}
-
-fun assert_target<Cap: key + store>(self: &Vault<Cap>, target_id: ID) {
-    assert!(self.target_id == target_id, ETargetMismatch)
-}
-
 fun assert_admin<Cap: key + store>(
     self: &Vault<Cap>,
     admin_cap: &VaultAdminCap<Cap>,
 ) {
     assert!(self.id() == admin_cap.vault_id, ENotVaultAdmin)
-}
-
-fun assert_installed<Cap: key + store, Witness: drop>(
-    self: &Vault<Cap>,
-    _: Witness,
-) {
-    self.assert_current_version();
-    assert!(self.plugins.contains(&witness_type<Witness>()), EPluginNotInstalled)
-}
-
-#[test_only]
-public fun set_version_for_testing<Cap: key + store>(self: &mut Vault<Cap>, version: u64) {
-    self.version = version
 }

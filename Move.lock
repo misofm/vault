@@ -16,26 +16,8 @@ use_environment = "testnet"
 manifest_digest = "7AFB66695545775FBFBB2D3078ADFD084244D5002392E837FDE21D9EA1C6D01C"
 deps = { MoveStdlib = "MoveStdlib" }
 
-[pinned.testnet.bps]
-source = { git = "https://github.com/unconfirmedlabs/bps.git", subdir = ".", rev = "26fa571e3d8fc79125e6a50f5b735c939a5251f6" }
-use_environment = "testnet"
-manifest_digest = "5745706258F61D6CE210904B3E6AE87A73CE9D31A6F93BE4718C442529332A87"
-deps = { std = "MoveStdlib", sui = "Sui" }
-
 [pinned.testnet.generic_witness]
 source = { local = "test_packages/generic_witness" }
-use_environment = "testnet"
-manifest_digest = "5745706258F61D6CE210904B3E6AE87A73CE9D31A6F93BE4718C442529332A87"
-deps = { std = "MoveStdlib", sui = "Sui" }
-
-[pinned.testnet.miso]
-source = { git = "https://github.com/misonetwork/protocol.git", subdir = ".", rev = "ecb3da52c14912e257f00b30185c598e92ffc5e3" }
-use_environment = "testnet"
-manifest_digest = "9D5B778785A67E397C05312FF863DBC4DAD53FB4A1A17DAA7B9CD97A44D382BD"
-deps = { bps = "bps", miso_share = "miso_share", std = "MoveStdlib", sui = "Sui" }
-
-[pinned.testnet.miso_share]
-source = { git = "https://github.com/misonetwork/share.git", subdir = ".", rev = "047d74d590372c9a360cdc164f84e0770210f42f" }
 use_environment = "testnet"
 manifest_digest = "5745706258F61D6CE210904B3E6AE87A73CE9D31A6F93BE4718C442529332A87"
 deps = { std = "MoveStdlib", sui = "Sui" }
@@ -43,5 +25,5 @@ deps = { std = "MoveStdlib", sui = "Sui" }
 [pinned.testnet.vault]
 source = { root = true }
 use_environment = "testnet"
-manifest_digest = "DB417D1CD62F0A7B43473282C43B53F79B26FF00247BA2E4D520C08E134D4C65"
-deps = { generic_witness = "generic_witness", miso = "miso", std = "MoveStdlib", sui = "Sui" }
+manifest_digest = "F75F9E8468B15EA1C22C97C7784FFD736933BEB8BC7308530C67D3FBF904BE39"
+deps = { generic_witness = "generic_witness", std = "MoveStdlib", sui = "Sui" }
