@@ -1,0 +1,7 @@
+/build/
+**/build/
+/package_summaries/
+/.coverage_map.mvcov
+/.trace
+/traces/
+.DS_Store
