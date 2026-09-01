@@ -6,7 +6,7 @@ module vault::vault_tests;
 
 use std::option;
 use std::unit_test::{Self, assert_eq};
-use sui::{bag, borrow, derived_object, dynamic_field, event, test_scenario};
+use sui::{bag, borrow, derived_object, event, test_scenario};
 use vault::vault::{
     Self,
     PluginAuthorizedEvent,
@@ -21,13 +21,13 @@ use vault::vault::{
 use vault::witness::{Self, Witness};
 
 const ENotVaultAdmin: u64 = 0;
+const EPluginAlreadyAuthorized: u64 = 1;
+const EPluginNotAuthorized: u64 = 2;
 const EPluginsRemain: u64 = 3;
 const EVaultEmpty: u64 = 4;
 const EWrongCapability: u64 = 5;
 const EWrongBorrow: u64 = 0;
 const EWrongValue: u64 = 1;
-const EFieldAlreadyExists: u64 = 0;
-const EFieldDoesNotExist: u64 = 1;
 const EOptionIsSet: u64 = 0x40000;
 const EOptionNotSet: u64 = 0x40001;
 
@@ -107,6 +107,7 @@ fun full_state_machine_cycle_preserves_exact_capability() {
     let vault_id = object::id(&vault);
     let admin_id = object::id(&admin_cap);
     let plugins_id = object::id(vault.authorized_plugins());
+    assert_eq!(admin_cap.vault_id(), vault_id);
 
     // P(0) -> P(1) -> B(1) -> P(1) -> P(0) -> E -> P(0) -> B(0) -> P(0).
     assert!(vault.is_active());
@@ -268,7 +269,7 @@ fun empty_vault_cannot_be_borrowed_by_admin() {
     discard(registry);
 }
 
-#[test, expected_failure(abort_code = EFieldDoesNotExist, location = dynamic_field)]
+#[test, expected_failure(abort_code = EPluginNotAuthorized, location = vault)]
 fun empty_vault_cannot_be_borrowed_by_plugin() {
     let ctx = &mut tx_context::dummy();
     let (registry, mut vault, admin_cap) = fixture(ctx);
@@ -382,7 +383,7 @@ fun revoking_every_plugin_allows_withdrawal() {
 
 // === Authorization and administrative isolation ===
 
-#[test, expected_failure(abort_code = EFieldDoesNotExist, location = dynamic_field)]
+#[test, expected_failure(abort_code = EPluginNotAuthorized, location = vault)]
 fun unauthorized_plugin_cannot_borrow_capability() {
     let ctx = &mut tx_context::dummy();
     let (registry, mut vault, admin_cap) = fixture(ctx);
@@ -394,7 +395,7 @@ fun unauthorized_plugin_cannot_borrow_capability() {
     discard(registry);
 }
 
-#[test, expected_failure(abort_code = EFieldAlreadyExists, location = dynamic_field)]
+#[test, expected_failure(abort_code = EPluginAlreadyAuthorized, location = vault)]
 fun plugin_cannot_be_authorized_twice() {
     let ctx = &mut tx_context::dummy();
     let (registry, mut vault, admin_cap) = fixture(ctx);
@@ -405,7 +406,7 @@ fun plugin_cannot_be_authorized_twice() {
     discard(registry);
 }
 
-#[test, expected_failure(abort_code = EFieldDoesNotExist, location = dynamic_field)]
+#[test, expected_failure(abort_code = EPluginNotAuthorized, location = vault)]
 fun absent_plugin_cannot_be_revoked() {
     let ctx = &mut tx_context::dummy();
     let (registry, mut vault, admin_cap) = fixture(ctx);
@@ -415,7 +416,7 @@ fun absent_plugin_cannot_be_revoked() {
     discard(registry);
 }
 
-#[test, expected_failure(abort_code = EFieldDoesNotExist, location = dynamic_field)]
+#[test, expected_failure(abort_code = EPluginNotAuthorized, location = vault)]
 fun revoked_plugin_cannot_borrow_capability() {
     let ctx = &mut tx_context::dummy();
     let (registry, mut vault, admin_cap) = fixture(ctx);

@@ -20,6 +20,10 @@ use sui::event::emit;
 
 /// The supplied vault admin capability belongs to a different vault.
 const ENotVaultAdmin: u64 = 0;
+/// A plugin with this witness type is already authorized.
+const EPluginAlreadyAuthorized: u64 = 1;
+/// No authorization exists for this plugin witness type.
+const EPluginNotAuthorized: u64 = 2;
 /// Every plugin authorization must be revoked before the capability can be withdrawn.
 const EPluginsRemain: u64 = 3;
 /// The Vault does not currently hold its capability.
@@ -179,9 +183,14 @@ public fun authorize_plugin<Cap: key + store, Witness: drop>(
 ) {
     self.assert_admin(admin_cap);
     assert!(self.cap.is_some(), EVaultEmpty);
+    let key = AuthorizedPluginKey<Witness>();
+    assert!(
+        !bag::contains(&self.authorized_plugins, key),
+        EPluginAlreadyAuthorized,
+    );
     bag::add(
         &mut self.authorized_plugins,
-        AuthorizedPluginKey<Witness>(),
+        key,
         true,
     );
     emit(PluginAuthorizedEvent<Cap, Witness> { vault_id: object::id(self) });
@@ -193,9 +202,11 @@ public fun revoke_plugin<Cap: key + store, Witness: drop>(
     admin_cap: &VaultAdminCap<Cap>,
 ) {
     self.assert_admin(admin_cap);
+    let key = AuthorizedPluginKey<Witness>();
+    assert!(bag::contains(&self.authorized_plugins, key), EPluginNotAuthorized);
     let _: bool = bag::remove(
         &mut self.authorized_plugins,
-        AuthorizedPluginKey<Witness>(),
+        key,
     );
     emit(PluginRevokedEvent<Cap, Witness> { vault_id: object::id(self) });
 }
@@ -210,6 +221,10 @@ public fun borrow_as_plugin<Cap: key + store, Witness: drop>(
     self: &mut Vault<Cap>,
     _: Witness,
 ): (Cap, Borrow) {
+    assert!(
+        bag::contains(&self.authorized_plugins, AuthorizedPluginKey<Witness>()),
+        EPluginNotAuthorized,
+    );
     let _: &bool = bag::borrow(
         &self.authorized_plugins,
         AuthorizedPluginKey<Witness>(),
@@ -243,6 +258,11 @@ public fun put_back<Cap: key + store>(
 /// Derive the canonical Vault address for `cap_id` in this registry.
 public fun derived_address<Cap: key + store>(registry: &VaultRegistry, cap_id: ID): address {
     derived_object::derive_address(object::id(registry), VaultKey<Cap>(cap_id))
+}
+
+/// Vault governed by this administrator capability.
+public fun vault_id<Cap: key + store>(self: &VaultAdminCap<Cap>): ID {
+    self.vault_id
 }
 
 /// The exact capability object permanently assigned to this Vault.
