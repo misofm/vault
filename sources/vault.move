@@ -260,11 +260,6 @@ public fun derived_address<Cap: key + store>(registry: &VaultRegistry, cap_id: I
     derived_object::derive_address(object::id(registry), VaultKey<Cap>(cap_id))
 }
 
-/// Vault governed by this administrator capability.
-public fun vault_id<Cap: key + store>(self: &VaultAdminCap<Cap>): ID {
-    self.vault_id
-}
-
 /// The exact capability object permanently assigned to this Vault.
 public fun cap_id<Cap: key + store>(self: &Vault<Cap>): ID {
     self.cap_id
