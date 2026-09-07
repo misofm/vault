@@ -5,3 +5,4 @@
 /.trace
 /traces/
 .DS_Store
+/.audit-scratch/
