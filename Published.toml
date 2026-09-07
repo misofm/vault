@@ -3,9 +3,9 @@
 # SHOULD be committed to source control.
 
 [published.testnet]
-chain-id = "4c78adac"
-published-at = "0xaed1aa729452c77f4c62882b73317851d628c30af55355c81eb1c93d3d3276ac"
-original-id = "0xaed1aa729452c77f4c62882b73317851d628c30af55355c81eb1c93d3d3276ac"
+chain-id = "69WiPg3DAQiwdxfncX6wYQ2siKwAe6L9BZthQea3JNMD"
+published-at = "0x77b74e9221874b9e29f6743a277810480bf89d71b5cb71741cd52dfcd83035d2"
+original-id = "0x77b74e9221874b9e29f6743a277810480bf89d71b5cb71741cd52dfcd83035d2"
 version = 1
+toolchain-version = "1.78.1"
 build-config = { flavor = "sui", edition = "2024" }
-source-digest = "4e2ed4fb655f6417252650712db63beae4603ec5f0953a9018cfaecbe849f4f7"
