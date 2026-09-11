@@ -13,10 +13,15 @@ use vault::vault::{
     PluginRevokedEvent,
     Vault,
     VaultAdminCap,
+    VaultCapabilityBorrowedByAdminEvent,
+    VaultCapabilityBorrowedByPluginEvent,
+    VaultCapabilityReturnedEvent,
     VaultCapabilityRestoredEvent,
     VaultCapabilityWithdrawnEvent,
     VaultCreatedEvent,
+    VaultRegistryCreatedEvent,
     VaultRegistry,
+    VaultSharedEvent,
 };
 use vault::witness::{Self, Witness};
 
@@ -197,13 +202,150 @@ fun registry_and_vault_are_shared_across_transactions() {
 }
 
 #[test]
+fun registry_init_and_vault_share_events_identify_shared_objects() {
+    let owner = @0xA;
+    let mut scenario = test_scenario::begin(owner);
+    vault::init_for_testing(scenario.ctx());
+
+    assert_eq!(event::events_by_type<VaultRegistryCreatedEvent>().length(), 1);
+    let (registry_id, shared) = vault::registry_created_event_fields(
+        &event::events_by_type<VaultRegistryCreatedEvent>()[0],
+    );
+    assert!(shared);
+
+    scenario.next_tx(owner);
+    let mut registry = scenario.take_shared<VaultRegistry>();
+    assert_eq!(registry_id, object::id(&registry).to_address());
+    let (vault, admin_cap) = new_vault(&mut registry, scenario.ctx());
+    let vault_id = object::id(&vault).to_address();
+    let cap_id = vault.cap_id().to_address();
+    test_scenario::return_shared(registry);
+    vault.share();
+    transfer::public_transfer(admin_cap, owner);
+
+    assert_eq!(event::events_by_type<VaultSharedEvent<TestCap>>().length(), 1);
+    let (shared_vault, shared_cap) = vault::vault_shared_event_fields(
+        &event::events_by_type<VaultSharedEvent<TestCap>>()[0],
+    );
+    assert_eq!(shared_vault, vault_id);
+    assert_eq!(shared_cap, cap_id);
+    assert_eq!(event::num_events(), 2);
+
+    scenario.next_tx(owner);
+    let vault = scenario.take_shared<Vault<TestCap>>();
+    let admin_cap = scenario.take_from_sender<VaultAdminCap<TestCap>>();
+    discard(admin_cap);
+    discard(vault);
+    scenario.end();
+}
+
+#[test]
+fun authorization_events_snapshot_each_typed_entry() {
+    let ctx = &mut tx_context::dummy();
+    let (registry, mut vault, admin_cap) = fixture(ctx);
+    let vault_id = object::id(&vault).to_address();
+    let cap_id = vault.cap_id().to_address();
+    let admin_id = object::id(&admin_cap).to_address();
+    let plugins_id = object::id(vault.authorized_plugins()).to_address();
+
+    authorize(&mut vault, &admin_cap);
+    vault.authorize_plugin(&admin_cap, 0u64);
+    vault.revoke_plugin<TestCap, Witness>(&admin_cap);
+    vault.revoke_plugin<TestCap, u64>(&admin_cap);
+
+    let witness_authorized = event::events_by_type<PluginAuthorizedEvent<TestCap, Witness>>();
+    let (event_vault, event_cap, event_admin, event_plugins, count, authorized) =
+        vault::plugin_authorized_event_vault_id(&witness_authorized[0]);
+    assert_eq!(event_vault, vault_id);
+    assert_eq!(event_cap, cap_id);
+    assert_eq!(event_admin, admin_id);
+    assert_eq!(event_plugins, plugins_id);
+    assert_eq!(count, 1);
+    assert!(authorized);
+
+    let integer_authorized = event::events_by_type<PluginAuthorizedEvent<TestCap, u64>>();
+    let (_, _, _, _, count, authorized) =
+        vault::plugin_authorized_event_vault_id(&integer_authorized[0]);
+    assert_eq!(count, 2);
+    assert!(authorized);
+
+    let witness_revoked = event::events_by_type<PluginRevokedEvent<TestCap, Witness>>();
+    let (_, _, _, _, count, authorized) =
+        vault::plugin_revoked_event_vault_id(&witness_revoked[0]);
+    assert_eq!(count, 1);
+    assert!(!authorized);
+
+    let integer_revoked = event::events_by_type<PluginRevokedEvent<TestCap, u64>>();
+    let (_, _, _, _, count, authorized) =
+        vault::plugin_revoked_event_vault_id(&integer_revoked[0]);
+    assert_eq!(count, 0);
+    assert!(!authorized);
+
+    discard(admin_cap);
+    discard(vault);
+    discard(registry);
+}
+
+#[test]
+fun borrow_and_return_events_preserve_capability_identity() {
+    let ctx = &mut tx_context::dummy();
+    let (registry, mut vault, admin_cap) = fixture(ctx);
+    let vault_id = object::id(&vault).to_address();
+    let cap_id = vault.cap_id().to_address();
+    let admin_id = object::id(&admin_cap).to_address();
+    authorize(&mut vault, &admin_cap);
+
+    let (cap, receipt) = vault.borrow_as_plugin(witness::new());
+    assert_eq!(object::id(&cap).to_address(), cap_id);
+    let plugin_events =
+        event::events_by_type<VaultCapabilityBorrowedByPluginEvent<TestCap, Witness>>();
+    let (event_vault, event_cap, active, available) =
+        vault::capability_borrowed_by_plugin_event_fields(&plugin_events[0]);
+    assert_eq!(event_vault, vault_id);
+    assert_eq!(event_cap, cap_id);
+    assert!(active);
+    assert!(!available);
+    vault.put_back(cap, receipt);
+
+    let returned_events = event::events_by_type<VaultCapabilityReturnedEvent<TestCap>>();
+    assert_eq!(returned_events.length(), 1);
+    let (event_vault, event_cap, active, available) =
+        vault::capability_returned_event_fields(&returned_events[0]);
+    assert_eq!(event_vault, vault_id);
+    assert_eq!(event_cap, cap_id);
+    assert!(active);
+    assert!(available);
+
+    let (cap, receipt) = vault.borrow_as_admin(&admin_cap);
+    assert_eq!(object::id(&cap).to_address(), cap_id);
+    let admin_events = event::events_by_type<VaultCapabilityBorrowedByAdminEvent<TestCap>>();
+    let (event_vault, event_cap, event_admin, active, available) =
+        vault::capability_borrowed_by_admin_event_fields(&admin_events[0]);
+    assert_eq!(event_vault, vault_id);
+    assert_eq!(event_cap, cap_id);
+    assert_eq!(event_admin, admin_id);
+    assert!(active);
+    assert!(!available);
+    vault.put_back(cap, receipt);
+    assert_eq!(event::events_by_type<VaultCapabilityReturnedEvent<TestCap>>().length(), 2);
+
+    discard(admin_cap);
+    discard(vault);
+    discard(registry);
+}
+
+#[test]
 fun lifecycle_events_identify_the_derived_objects() {
     let ctx = &mut tx_context::dummy();
     let mut registry = vault::new_registry_for_testing(ctx);
+    let expected_registry = object::id(&registry).to_address();
     let cap = new_test_cap(ctx);
     let cap_id = object::id(&cap);
-    let expected_vault = vault::derived_address<TestCap>(&registry, cap_id).to_id();
+    let expected_vault = vault::derived_address<TestCap>(&registry, cap_id);
+    let expected_cap = cap_id.to_address();
     let (mut vault, admin_cap) = vault::new(&mut registry, cap, ctx);
+    let expected_admin = object::id(&admin_cap).to_address();
+    let expected_plugins = object::id(vault.authorized_plugins()).to_address();
     authorize(&mut vault, &admin_cap);
     vault.revoke_plugin<TestCap, Witness>(&admin_cap);
     let cap = vault.withdraw_cap(&admin_cap);
@@ -215,36 +357,70 @@ fun lifecycle_events_identify_the_derived_objects() {
     assert_eq!(event::events_by_type<PluginRevokedEvent<TestCap, Witness>>().length(), 1);
     assert_eq!(event::events_by_type<VaultCapabilityWithdrawnEvent<TestCap>>().length(), 1);
     assert_eq!(event::events_by_type<VaultCapabilityRestoredEvent<TestCap>>().length(), 1);
-    let (created_vault, created_cap) =
-        vault::vault_created_event_ids(
-            &event::events_by_type<VaultCreatedEvent<TestCap>>()[0],
-        );
+    let (
+        created_registry,
+        created_vault,
+        created_cap,
+        created_admin,
+        created_plugins,
+        created_count,
+        created_active,
+        created_available,
+    ) = vault::vault_created_event_ids(
+        &event::events_by_type<VaultCreatedEvent<TestCap>>()[0],
+    );
+    assert_eq!(created_registry, expected_registry);
     assert_eq!(created_vault, expected_vault);
-    assert_eq!(created_cap, cap_id);
-    assert_eq!(
+    assert_eq!(created_cap, expected_cap);
+    assert_eq!(created_admin, expected_admin);
+    assert_eq!(created_plugins, expected_plugins);
+    assert_eq!(created_count, 0);
+    assert!(created_active);
+    assert!(created_available);
+    let (authorized_vault, authorized_cap, authorized_admin, authorized_plugins, authorized_count, authorized) =
         vault::plugin_authorized_event_vault_id(
             &event::events_by_type<PluginAuthorizedEvent<TestCap, Witness>>()[0],
-        ),
-        expected_vault,
-    );
-    assert_eq!(
+        );
+    assert_eq!(authorized_vault, expected_vault);
+    assert_eq!(authorized_cap, expected_cap);
+    assert_eq!(authorized_admin, expected_admin);
+    assert_eq!(authorized_plugins, expected_plugins);
+    assert_eq!(authorized_count, 1);
+    assert!(authorized);
+    let (revoked_vault, revoked_cap, revoked_admin, revoked_plugins, revoked_count, revoked) =
         vault::plugin_revoked_event_vault_id(
             &event::events_by_type<PluginRevokedEvent<TestCap, Witness>>()[0],
-        ),
-        expected_vault,
-    );
-    assert_eq!(
+        );
+    assert_eq!(revoked_vault, expected_vault);
+    assert_eq!(revoked_cap, expected_cap);
+    assert_eq!(revoked_admin, expected_admin);
+    assert_eq!(revoked_plugins, expected_plugins);
+    assert_eq!(revoked_count, 0);
+    assert!(!revoked);
+    let (withdrawn_vault, withdrawn_cap, withdrawn_admin, withdrawn_active, withdrawn_available) =
         vault::capability_withdrawn_event_vault_id(
             &event::events_by_type<VaultCapabilityWithdrawnEvent<TestCap>>()[0],
-        ),
-        expected_vault,
-    );
-    assert_eq!(
+        );
+    assert_eq!(withdrawn_vault, expected_vault);
+    assert_eq!(withdrawn_cap, expected_cap);
+    assert_eq!(withdrawn_admin, expected_admin);
+    assert!(!withdrawn_active);
+    assert!(!withdrawn_available);
+    let (restored_vault, restored_cap, restored_admin, restored_active, restored_available) =
         vault::capability_restored_event_vault_id(
             &event::events_by_type<VaultCapabilityRestoredEvent<TestCap>>()[0],
-        ),
-        expected_vault,
-    );
+        );
+    assert_eq!(restored_vault, expected_vault);
+    assert_eq!(restored_cap, expected_cap);
+    assert_eq!(restored_admin, expected_admin);
+    assert!(restored_active);
+    assert!(restored_available);
+    let _ = vault::derived_address<TestCap>(&registry, cap_id);
+    let _ = vault.cap_id();
+    let _ = vault.is_active();
+    let _ = vault.authorized_plugins();
+    let _ = vault.is_plugin_authorized<TestCap, Witness>();
+    assert_eq!(event::num_events(), 5);
 
     discard(admin_cap);
     discard(vault);

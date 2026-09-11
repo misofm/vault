@@ -43,6 +43,23 @@ without deleting or changing the Vault object's identity.
 | `restore_cap` | Restore the exact capability originally assigned to the Vault. |
 | `derived_address` | Derive a Vault address from registry, capability type, and cap ID. |
 
+## Events
+
+Successful registry initialization, Vault creation and sharing, plugin
+authorization and revocation, capability withdrawal and restoration, and
+plugin/admin borrow and return operations emit the corresponding
+`*Event` type from `vault::vault`. Every event uses primitive `address`
+identifiers, `u64` authorization counts, and boolean state snapshots so an
+indexer can reconcile object and Bag state without decoding object IDs or
+reading the capability. Vault and capability events are generic over the
+capability type; authorization and plugin-borrow events also carry the
+phantom witness type, which keeps typed plugin streams separate.
+
+`active` reports whether the outer capability `Referent` exists. It stays true
+during a transaction-local borrow. `capability_available` reports whether the
+capability is currently in Vault custody: it is false during a borrow and
+after withdrawal, and true after creation, restoration, and return.
+
 ## Creation and discovery
 
 ```move
