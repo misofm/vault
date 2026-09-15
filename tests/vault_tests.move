@@ -13,8 +13,6 @@ use vault::vault::{
     PluginRevokedEvent,
     Vault,
     VaultAdminCap,
-    VaultCapabilityBorrowedByAdminEvent,
-    VaultCapabilityBorrowedByPluginEvent,
     VaultCapabilityRestoredEvent,
     VaultCapabilityWithdrawnEvent,
     VaultCreatedEvent,
@@ -286,42 +284,26 @@ fun authorization_events_snapshot_each_typed_entry() {
 }
 
 #[test]
-fun borrow_events_preserve_capability_identity() {
+fun successful_borrow_and_return_is_silent() {
     let ctx = &mut tx_context::dummy();
     let (registry, mut vault, admin_cap) = fixture(ctx);
-    let vault_id = object::id(&vault).to_address();
     let cap_id = vault.cap_id().to_address();
-    let admin_id = object::id(&admin_cap).to_address();
     authorize(&mut vault, &admin_cap);
 
+    let events_before_plugin_borrow = event::num_events();
     let (cap, receipt) = vault.borrow_as_plugin(witness::new());
     assert_eq!(object::id(&cap).to_address(), cap_id);
-    let plugin_events =
-        event::events_by_type<VaultCapabilityBorrowedByPluginEvent<TestCap, Witness>>();
-    let (event_vault, event_cap, active, available) =
-        vault::capability_borrowed_by_plugin_event_fields(&plugin_events[0]);
-    assert_eq!(event_vault, vault_id);
-    assert_eq!(event_cap, cap_id);
-    assert!(active);
-    assert!(!available);
-    let events_before_plugin_return = event::num_events();
+    assert_eq!(event::num_events(), events_before_plugin_borrow);
     vault.put_back(cap, receipt);
-    assert_eq!(event::num_events(), events_before_plugin_return);
+    assert_eq!(event::num_events(), events_before_plugin_borrow);
     assert!(vault.is_active());
 
+    let events_before_admin_borrow = event::num_events();
     let (cap, receipt) = vault.borrow_as_admin(&admin_cap);
     assert_eq!(object::id(&cap).to_address(), cap_id);
-    let admin_events = event::events_by_type<VaultCapabilityBorrowedByAdminEvent<TestCap>>();
-    let (event_vault, event_cap, event_admin, active, available) =
-        vault::capability_borrowed_by_admin_event_fields(&admin_events[0]);
-    assert_eq!(event_vault, vault_id);
-    assert_eq!(event_cap, cap_id);
-    assert_eq!(event_admin, admin_id);
-    assert!(active);
-    assert!(!available);
-    let events_before_admin_return = event::num_events();
+    assert_eq!(event::num_events(), events_before_admin_borrow);
     vault.put_back(cap, receipt);
-    assert_eq!(event::num_events(), events_before_admin_return);
+    assert_eq!(event::num_events(), events_before_admin_borrow);
     assert!(vault.is_active());
 
     discard(admin_cap);

@@ -46,14 +46,15 @@ without deleting or changing the Vault object's identity.
 ## Events
 
 Successful registry initialization, Vault creation and sharing, plugin
-authorization and revocation, capability withdrawal and restoration, and
-plugin/admin borrow operations emit the corresponding `*Event` type from
-`vault::vault`; `put_back` consumes the hot-potato receipt without emitting a
-second success event. Every event uses primitive `address`
+authorization and revocation, and capability withdrawal and restoration emit
+the corresponding `*Event` type from `vault::vault`. Plugin/admin borrowing and
+`put_back` are silent: the hot-potato receipt requires return within the same
+transaction, and underlying operations report their business outcomes.
+Every event uses primitive `address`
 identifiers, `u64` authorization counts, and boolean state snapshots so an
 indexer can reconcile object and Bag state without decoding object IDs or
 reading the capability. Vault and capability events are generic over the
-capability type; authorization and plugin-borrow events also carry the
+capability type; authorization events also carry the
 phantom witness type, which keeps typed plugin streams separate.
 
 `active` reports whether the outer capability `Referent` exists. It stays true
