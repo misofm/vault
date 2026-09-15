@@ -47,8 +47,9 @@ without deleting or changing the Vault object's identity.
 
 Successful registry initialization, Vault creation and sharing, plugin
 authorization and revocation, capability withdrawal and restoration, and
-plugin/admin borrow and return operations emit the corresponding
-`*Event` type from `vault::vault`. Every event uses primitive `address`
+plugin/admin borrow operations emit the corresponding `*Event` type from
+`vault::vault`; `put_back` consumes the hot-potato receipt without emitting a
+second success event. Every event uses primitive `address`
 identifiers, `u64` authorization counts, and boolean state snapshots so an
 indexer can reconcile object and Bag state without decoding object IDs or
 reading the capability. Vault and capability events are generic over the

@@ -143,13 +143,6 @@ public struct VaultCapabilityBorrowedByAdminEvent<phantom Cap> has copy, drop {
     capability_available: bool,
 }
 
-public struct VaultCapabilityReturnedEvent<phantom Cap> has copy, drop {
-    vault_id: address,
-    cap_id: address,
-    active: bool,
-    capability_available: bool,
-}
-
 // === Lifecycle ===
 
 fun init(ctx: &mut TxContext) {
@@ -358,12 +351,6 @@ public fun put_back<Cap: key + store>(
     receipt: Borrow,
 ) {
     self.cap.borrow_mut().put_back(cap, receipt);
-    emit(VaultCapabilityReturnedEvent<Cap> {
-        vault_id: object::id(self).to_address(),
-        cap_id: self.cap_id.to_address(),
-        active: true,
-        capability_available: true,
-    });
 }
 
 // === Views ===
@@ -518,11 +505,4 @@ public fun capability_borrowed_by_admin_event_fields<Cap>(
         event.active,
         event.capability_available,
     )
-}
-
-#[test_only]
-public fun capability_returned_event_fields<Cap>(
-    event: &VaultCapabilityReturnedEvent<Cap>,
-): (address, address, bool, bool) {
-    (event.vault_id, event.cap_id, event.active, event.capability_available)
 }
