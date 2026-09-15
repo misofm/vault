@@ -15,7 +15,6 @@ use vault::vault::{
     VaultAdminCap,
     VaultCapabilityBorrowedByAdminEvent,
     VaultCapabilityBorrowedByPluginEvent,
-    VaultCapabilityReturnedEvent,
     VaultCapabilityRestoredEvent,
     VaultCapabilityWithdrawnEvent,
     VaultCreatedEvent,
@@ -287,7 +286,7 @@ fun authorization_events_snapshot_each_typed_entry() {
 }
 
 #[test]
-fun borrow_and_return_events_preserve_capability_identity() {
+fun borrow_events_preserve_capability_identity() {
     let ctx = &mut tx_context::dummy();
     let (registry, mut vault, admin_cap) = fixture(ctx);
     let vault_id = object::id(&vault).to_address();
@@ -305,16 +304,10 @@ fun borrow_and_return_events_preserve_capability_identity() {
     assert_eq!(event_cap, cap_id);
     assert!(active);
     assert!(!available);
+    let events_before_plugin_return = event::num_events();
     vault.put_back(cap, receipt);
-
-    let returned_events = event::events_by_type<VaultCapabilityReturnedEvent<TestCap>>();
-    assert_eq!(returned_events.length(), 1);
-    let (event_vault, event_cap, active, available) =
-        vault::capability_returned_event_fields(&returned_events[0]);
-    assert_eq!(event_vault, vault_id);
-    assert_eq!(event_cap, cap_id);
-    assert!(active);
-    assert!(available);
+    assert_eq!(event::num_events(), events_before_plugin_return);
+    assert!(vault.is_active());
 
     let (cap, receipt) = vault.borrow_as_admin(&admin_cap);
     assert_eq!(object::id(&cap).to_address(), cap_id);
@@ -326,8 +319,10 @@ fun borrow_and_return_events_preserve_capability_identity() {
     assert_eq!(event_admin, admin_id);
     assert!(active);
     assert!(!available);
+    let events_before_admin_return = event::num_events();
     vault.put_back(cap, receipt);
-    assert_eq!(event::events_by_type<VaultCapabilityReturnedEvent<TestCap>>().length(), 2);
+    assert_eq!(event::num_events(), events_before_admin_return);
+    assert!(vault.is_active());
 
     discard(admin_cap);
     discard(vault);
