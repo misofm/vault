@@ -304,7 +304,10 @@ fun borrow_events_preserve_capability_identity() {
     assert_eq!(event_cap, cap_id);
     assert!(active);
     assert!(!available);
+    let events_before_plugin_return = event::num_events();
     vault.put_back(cap, receipt);
+    assert_eq!(event::num_events(), events_before_plugin_return);
+    assert!(vault.is_active());
 
     let (cap, receipt) = vault.borrow_as_admin(&admin_cap);
     assert_eq!(object::id(&cap).to_address(), cap_id);
@@ -316,7 +319,10 @@ fun borrow_events_preserve_capability_identity() {
     assert_eq!(event_admin, admin_id);
     assert!(active);
     assert!(!available);
+    let events_before_admin_return = event::num_events();
     vault.put_back(cap, receipt);
+    assert_eq!(event::num_events(), events_before_admin_return);
+    assert!(vault.is_active());
 
     discard(admin_cap);
     discard(vault);
