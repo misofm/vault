@@ -18,7 +18,6 @@ use vault::vault::{
     VaultCreatedEvent,
     VaultRegistryCreatedEvent,
     VaultRegistry,
-    VaultSharedEvent,
 };
 use vault::witness::{Self, Witness};
 
@@ -199,7 +198,7 @@ fun registry_and_vault_are_shared_across_transactions() {
 }
 
 #[test]
-fun registry_init_and_vault_share_events_identify_shared_objects() {
+fun registry_and_vault_creation_identify_objects_and_sharing_is_silent() {
     let owner = @0xA;
     let mut scenario = test_scenario::begin(owner);
     vault::init_for_testing(scenario.ctx());
@@ -217,20 +216,28 @@ fun registry_init_and_vault_share_events_identify_shared_objects() {
     let vault_id = object::id(&vault).to_address();
     let cap_id = vault.cap_id().to_address();
     test_scenario::return_shared(registry);
+    let event_count = event::num_events();
     vault.share();
+    assert_eq!(event::num_events(), event_count);
     transfer::public_transfer(admin_cap, owner);
 
-    assert_eq!(event::events_by_type<VaultSharedEvent<TestCap>>().length(), 1);
-    let (shared_vault, shared_cap) = vault::vault_shared_event_fields(
-        &event::events_by_type<VaultSharedEvent<TestCap>>()[0],
-    );
-    assert_eq!(shared_vault, vault_id);
-    assert_eq!(shared_cap, cap_id);
-    assert_eq!(event::num_events(), 2);
+    let created = event::events_by_type<VaultCreatedEvent<TestCap>>();
+    assert_eq!(created.length(), 1);
+    let (created_registry, created_vault, created_cap, _, _, count, active, available) =
+        vault::vault_created_event_ids(&created[0]);
+    assert_eq!(created_registry, registry_id);
+    assert_eq!(created_vault, vault_id);
+    assert_eq!(created_cap, cap_id);
+    assert_eq!(count, 0);
+    assert!(active && available);
+    assert_eq!(event::num_events(), 1);
 
     scenario.next_tx(owner);
     let vault = scenario.take_shared<Vault<TestCap>>();
     let admin_cap = scenario.take_from_sender<VaultAdminCap<TestCap>>();
+    assert_eq!(object::id(&vault).to_address(), vault_id);
+    assert_eq!(vault.cap_id().to_address(), cap_id);
+    assert!(vault.is_active());
     discard(admin_cap);
     discard(vault);
     scenario.end();

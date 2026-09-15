@@ -89,11 +89,6 @@ public struct VaultCreatedEvent<phantom Cap> has copy, drop {
     capability_available: bool,
 }
 
-public struct VaultSharedEvent<phantom Cap> has copy, drop {
-    vault_id: address,
-    cap_id: address,
-}
-
 public struct PluginAuthorizedEvent<phantom Cap, phantom Witness> has copy, drop {
     vault_id: address,
     cap_id: address,
@@ -182,10 +177,7 @@ public fun new<Cap: key + store>(
 
 /// Share a newly-created vault.
 public fun share<Cap: key + store>(vault: Vault<Cap>) {
-    let vault_id = object::id(&vault).to_address();
-    let cap_id = vault.cap_id.to_address();
     transfer::share_object(vault);
-    emit(VaultSharedEvent<Cap> { vault_id, cap_id });
 }
 
 /// Withdraw the exact capability while leaving its canonical Vault and
@@ -398,11 +390,6 @@ public fun vault_created_event_ids<Cap>(
         event.active,
         event.capability_available,
     )
-}
-
-#[test_only]
-public fun vault_shared_event_fields<Cap>(event: &VaultSharedEvent<Cap>): (address, address) {
-    (event.vault_id, event.cap_id)
 }
 
 #[test_only]

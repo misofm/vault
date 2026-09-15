@@ -45,9 +45,12 @@ without deleting or changing the Vault object's identity.
 
 ## Events
 
-Successful registry initialization, Vault creation and sharing, plugin
+Successful registry initialization, Vault creation, plugin
 authorization and revocation, and capability withdrawal and restoration emit
-the corresponding `*Event` type from `vault::vault`. Plugin/admin borrowing and
+the corresponding `*Event` type from `vault::vault`. `VaultCreatedEvent` retains
+registry, Vault, capability and administrator identity plus initial state. Sharing
+is silent; authorization and custody changes retain their own events even when
+performed before sharing. Plugin/admin borrowing and
 `put_back` are silent: the hot-potato receipt requires return within the same
 transaction, and underlying operations report their business outcomes.
 Every event uses primitive `address`
