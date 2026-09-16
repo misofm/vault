@@ -135,15 +135,15 @@ fun init(ctx: &mut TxContext) {
     });
 }
 
-/// Custody `cap` in its canonical permanent Vault and create the canonical
+/// Custody `vaulted_cap` in its canonical permanent Vault and create the canonical
 /// vault-specific administrator capability.
 public fun new<Cap: key + store>(
     registry: &mut VaultRegistry,
-    cap: Cap,
+    vaulted_cap: Cap,
     ctx: &mut TxContext,
 ): (Vault<Cap>, VaultAdminCap<Cap>) {
     let registry_id = object::id(registry).to_address();
-    let cap_id = object::id(&cap);
+    let cap_id = object::id(&vaulted_cap);
     let mut vault_id = derived_object::claim(
         &mut registry.id,
         VaultKey<Cap>(cap_id),
@@ -157,7 +157,7 @@ public fun new<Cap: key + store>(
     let vault = Vault {
         id: vault_id,
         cap_id,
-        cap: option::some(borrow::new(cap, ctx)),
+        cap: option::some(borrow::new(vaulted_cap, ctx)),
         authorized_plugins: bag::new(ctx),
     };
 
@@ -184,38 +184,38 @@ public fun share<Cap: key + store>(vault: Vault<Cap>) {
 /// VaultAdminCap intact. Every plugin must be revoked first.
 public fun withdraw_cap<Cap: key + store>(
     self: &mut Vault<Cap>,
-    admin_cap: &VaultAdminCap<Cap>,
+    cap: &VaultAdminCap<Cap>,
 ): Cap {
-    self.assert_admin(admin_cap);
+    self.assert_admin(cap);
     assert!(bag::is_empty(&self.authorized_plugins), EPluginsRemain);
 
-    let cap = self.cap.extract().destroy();
+    let vaulted_cap = self.cap.extract().destroy();
     emit(VaultCapabilityWithdrawnEvent<Cap> {
         vault_id: object::id(self).to_address(),
         cap_id: self.cap_id.to_address(),
-        admin_cap_id: object::id(admin_cap).to_address(),
+        admin_cap_id: object::id(cap).to_address(),
         active: false,
         capability_available: false,
     });
-    cap
+    vaulted_cap
 }
 
 /// Restore the exact capability used to derive this permanent Vault.
 /// Restoring always starts from a clean plugin-authorization slate.
 public fun restore_cap<Cap: key + store>(
     self: &mut Vault<Cap>,
-    admin_cap: &VaultAdminCap<Cap>,
-    cap: Cap,
+    cap: &VaultAdminCap<Cap>,
+    vaulted_cap: Cap,
     ctx: &mut TxContext,
 ) {
-    self.assert_admin(admin_cap);
-    assert!(object::id(&cap) == self.cap_id, EWrongCapability);
+    self.assert_admin(cap);
+    assert!(object::id(&vaulted_cap) == self.cap_id, EWrongCapability);
 
-    self.cap.fill(borrow::new(cap, ctx));
+    self.cap.fill(borrow::new(vaulted_cap, ctx));
     emit(VaultCapabilityRestoredEvent<Cap> {
         vault_id: object::id(self).to_address(),
         cap_id: self.cap_id.to_address(),
-        admin_cap_id: object::id(admin_cap).to_address(),
+        admin_cap_id: object::id(cap).to_address(),
         active: true,
         capability_available: true,
     });
@@ -226,10 +226,10 @@ public fun restore_cap<Cap: key + store>(
 /// Authorize the plugin identified by this witness type.
 public fun authorize_plugin<Cap: key + store, Witness: drop>(
     self: &mut Vault<Cap>,
-    admin_cap: &VaultAdminCap<Cap>,
+    cap: &VaultAdminCap<Cap>,
     _: Witness,
 ) {
-    self.assert_admin(admin_cap);
+    self.assert_admin(cap);
     assert!(self.cap.is_some(), EVaultEmpty);
     let key = AuthorizedPluginKey<Witness>();
     assert!(
@@ -244,7 +244,7 @@ public fun authorize_plugin<Cap: key + store, Witness: drop>(
     emit(PluginAuthorizedEvent<Cap, Witness> {
         vault_id: object::id(self).to_address(),
         cap_id: self.cap_id.to_address(),
-        admin_cap_id: object::id(admin_cap).to_address(),
+        admin_cap_id: object::id(cap).to_address(),
         authorized_plugins_id: object::id(&self.authorized_plugins).to_address(),
         authorized_plugin_count: bag::length(&self.authorized_plugins),
         authorized: true,
@@ -254,9 +254,9 @@ public fun authorize_plugin<Cap: key + store, Witness: drop>(
 /// Revoke a plugin authorization without requiring cooperation from the plugin.
 public fun revoke_plugin<Cap: key + store, Witness: drop>(
     self: &mut Vault<Cap>,
-    admin_cap: &VaultAdminCap<Cap>,
+    cap: &VaultAdminCap<Cap>,
 ) {
-    self.assert_admin(admin_cap);
+    self.assert_admin(cap);
     let key = AuthorizedPluginKey<Witness>();
     assert!(bag::contains(&self.authorized_plugins, key), EPluginNotAuthorized);
     let _: bool = bag::remove(
@@ -266,7 +266,7 @@ public fun revoke_plugin<Cap: key + store, Witness: drop>(
     emit(PluginRevokedEvent<Cap, Witness> {
         vault_id: object::id(self).to_address(),
         cap_id: self.cap_id.to_address(),
-        admin_cap_id: object::id(admin_cap).to_address(),
+        admin_cap_id: object::id(cap).to_address(),
         authorized_plugins_id: object::id(&self.authorized_plugins).to_address(),
         authorized_plugin_count: bag::length(&self.authorized_plugins),
         authorized: false,
@@ -291,18 +291,18 @@ public fun borrow_as_plugin<Cap: key + store, Witness: drop>(
         &self.authorized_plugins,
         AuthorizedPluginKey<Witness>(),
     );
-    let (cap, receipt) = self.cap.borrow_mut().borrow();
-    (cap, receipt)
+    let (vaulted_cap, receipt) = self.cap.borrow_mut().borrow();
+    (vaulted_cap, receipt)
 }
 
 /// Temporarily lend the full custodied capability to the vault administrator.
 public fun borrow_as_admin<Cap: key + store>(
     self: &mut Vault<Cap>,
-    admin_cap: &VaultAdminCap<Cap>,
+    cap: &VaultAdminCap<Cap>,
 ): (Cap, Borrow) {
-    self.assert_admin(admin_cap);
-    let (cap, receipt) = self.cap.borrow_mut().borrow();
-    (cap, receipt)
+    self.assert_admin(cap);
+    let (vaulted_cap, receipt) = self.cap.borrow_mut().borrow();
+    (vaulted_cap, receipt)
 }
 
 /// Return the exact capability borrowed from this vault.
@@ -311,10 +311,10 @@ public fun borrow_as_admin<Cap: key + store>(
 /// referent and capability object ID, and blocking return would harm liveness.
 public fun put_back<Cap: key + store>(
     self: &mut Vault<Cap>,
-    cap: Cap,
+    vaulted_cap: Cap,
     receipt: Borrow,
 ) {
-    self.cap.borrow_mut().put_back(cap, receipt);
+    self.cap.borrow_mut().put_back(vaulted_cap, receipt);
 }
 
 // === Views ===
@@ -351,9 +351,9 @@ public fun is_plugin_authorized<Cap: key + store, Witness: drop>(self: &Vault<Ca
 
 fun assert_admin<Cap: key + store>(
     self: &Vault<Cap>,
-    admin_cap: &VaultAdminCap<Cap>,
+    cap: &VaultAdminCap<Cap>,
 ) {
-    assert!(object::id(self) == admin_cap.vault_id, ENotVaultAdmin)
+    assert!(object::id(self) == cap.vault_id, ENotVaultAdmin)
 }
 
 #[test_only]

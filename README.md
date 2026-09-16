@@ -13,8 +13,8 @@ without deleting or changing the Vault object's identity.
 ## Design
 
 - `init` creates and shares one `VaultRegistry`.
-- `new(&mut registry, cap, ctx)` claims
-  `VaultKey<Cap>(object::id(&cap))`, producing one canonical Vault for that
+- `new(&mut registry, vaulted_cap, ctx)` claims
+  `VaultKey<Cap>(object::id(&vaulted_cap))`, producing one canonical Vault for that
   exact capability object.
 - The corresponding `VaultAdminCap<Cap>` is itself derived from the Vault with
   `VaultAdminCapKey()`.
@@ -68,14 +68,14 @@ after withdrawal, and true after creation, restoration, and return.
 ## Creation and discovery
 
 ```move
-let (vault, vault_admin_cap) = vault::vault::new(
+let (vault, cap) = vault::vault::new(
     &mut registry,
-    release_admin_cap,
+    vaulted_cap,
     ctx,
 );
 vault::vault::share(vault);
 transfer::public_transfer(
-    vault_admin_cap,
+    cap,
     ctx.sender(),
 );
 ```
@@ -97,10 +97,10 @@ that creation has happened.
 
 ```move
 // All plugin authorizations must already be revoked.
-let release_admin_cap = vault.withdraw_cap(&vault_admin_cap);
+let vaulted_cap = vault.withdraw_cap(&cap);
 
 // Later, restore the same object ID to the same permanent shell.
-vault.restore_cap(&vault_admin_cap, release_admin_cap, ctx);
+vault.restore_cap(&cap, vaulted_cap, ctx);
 ```
 
 Once withdrawn, the raw capability can be transferred, wrapped, frozen,
