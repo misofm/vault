@@ -1,7 +1,7 @@
 # Vault
 
 Vault is a generic Sui Move primitive for permanent, discoverable capability
-custody. A `Vault<VaultedCap>` has a deterministic ID, temporarily lends its exact
+custody. A `Vault<Cap>` has a deterministic ID, temporarily lends its exact
 capability through Sui's hot-potato `Borrow`, and can be emptied and restored
 without deleting or changing the Vault object's identity.
 
@@ -14,13 +14,13 @@ without deleting or changing the Vault object's identity.
 
 - `init` creates and shares one `VaultRegistry`.
 - `new(&mut registry, vaulted_cap, ctx)` claims
-  `VaultKey<VaultedCap>(object::id(&vaulted_cap))`, producing one canonical Vault for that
+  `VaultKey<Cap>(object::id(&vaulted_cap))`, producing one canonical Vault for that
   exact capability object.
-- The corresponding `VaultAdminCap<VaultedCap>` is itself derived from the Vault with
+- The corresponding `VaultAdminCap<Cap>` is itself derived from the Vault with
   `VaultAdminCapKey()`.
 - The Vault is a permanent `key`-only shell. Production code has no deletion
   path, and a derived claim can never be reclaimed.
-- The optional `Referent<VaultedCap>` is present while the Vault is active and absent
+- The optional `Referent<Cap>` is present while the Vault is active and absent
   after withdrawal. Only the original capability ID can restore it.
 - Withdrawal requires the complete plugin-authorization Bag to be empty.
 - `VaultAdminCap` has `key + store`, so transfer and custody policy can be
@@ -31,7 +31,7 @@ without deleting or changing the Vault object's identity.
 ## Naming
 
 `cap` and `cap_id` refer to the Vault administrator capability (`VaultAdminCap`).
-`vaulted_cap`, `vaulted_cap_id`, and the generic type `VaultedCap` refer to the
+`vaulted_cap`, `vaulted_cap_id`, and the generic type `Cap` refer to the
 custodied capability. This convention also applies to stored fields and events.
 
 Clients must use `vaulted_cap_id` for the custodied object ID; event `cap_id`
@@ -42,7 +42,7 @@ decoders together with the renamed API.
 
 | Function | Purpose |
 |---|---|
-| `new` | Claim the canonical IDs and return `(Vault<VaultedCap>, VaultAdminCap<VaultedCap>)`. |
+| `new` | Claim the canonical IDs and return `(Vault<Cap>, VaultAdminCap<Cap>)`. |
 | `share` | Share a newly created Vault. |
 | `authorize_plugin` | Add a plugin witness type while active. |
 | `revoke_plugin` | Remove an authorization without plugin cooperation. |
