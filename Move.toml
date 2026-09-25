@@ -2,4 +2,4 @@
 name = "vault"
 edition = "2024"
 license = "Apache 2.0"
-authors = ["Miso Labs, Inc. (build@miso.network)"]
+authors = ["Miso Labs, Inc. (build@miso.fm)"]
