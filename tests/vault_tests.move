@@ -68,7 +68,7 @@ fun destroy_vaulted_cap(vaulted_cap: TestCap) {
     id.delete();
 }
 
-fun discard<T>(value: T) {
+fun discard<Value>(value: Value) {
     unit_test::destroy(value)
 }
 
