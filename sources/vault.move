@@ -176,8 +176,8 @@ public fun new<Cap: key + store>(
 }
 
 /// Share a newly-created vault.
-public fun share<Cap: key + store>(vault: Vault<Cap>) {
-    transfer::share_object(vault);
+public fun share<Cap: key + store>(self: Vault<Cap>) {
+    transfer::share_object(self);
 }
 
 /// Withdraw the exact capability while leaving its canonical Vault and
