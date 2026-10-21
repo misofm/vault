@@ -23,6 +23,7 @@ without deleting or changing the Vault object's identity.
 - The optional `Referent<Cap>` is present while the Vault is active and absent
   after withdrawal. Only the original capability ID can restore it.
 - Withdrawal requires the complete plugin-authorization Bag to be empty.
+- `Vault` lacks `store`, so only this module can share it.
 - `VaultAdminCap` has `key + store`, so transfer and custody policy can be
   composed outside this package.
 - `is_active` reports whether the outer Referent is present. It remains true
@@ -48,7 +49,7 @@ decoders together with the renamed API.
 | `revoke_plugin` | Remove an authorization without plugin cooperation. |
 | `borrow_as_plugin` | Lend the capability to an authorized plugin for this PTB. |
 | `borrow_as_admin` | Lend the capability to the matching administrator. |
-| `put_back` | Return the exact capability and consume its `Borrow`. |
+| `put_back` | Return the exact capability and consume its `Borrow`. Needs no further authorization: `Borrow` already proves the Vault and capability ID, and gating the return would only harm liveness. |
 | `withdraw_vaulted_cap` | Return the capability while preserving the empty Vault shell. |
 | `restore_vaulted_cap` | Restore the exact capability originally assigned to the Vault. |
 | `derived_address` | Derive a Vault address from registry, capability type, and cap ID. |

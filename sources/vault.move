@@ -1,14 +1,6 @@
 // Copyright (c) Miso Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-/// Generic capability custody and plugin authorization.
-///
-/// `Vault<Cap>` is a permanent, deterministically addressed shell that can hold
-/// one exact capability in a Sui `Referent`. An authorized plugin receives the
-/// whole capability temporarily, paired with a hot-potato `Borrow` receipt that
-/// forces the same capability back into the same vault before the transaction
-/// can finish. Plugin authorization is represented by a typed dynamic field in
-/// the vault's `Bag`.
 module vault::vault;
 
 use sui::bag::{Self, Bag};
@@ -18,32 +10,19 @@ use sui::event::emit;
 
 // === Errors ===
 
-/// The supplied vault admin capability belongs to a different vault.
 const ENotVaultAdmin: u64 = 0;
-/// A plugin with this witness type is already authorized.
 const EPluginAlreadyAuthorized: u64 = 1;
-/// No authorization exists for this plugin witness type.
 const EPluginNotAuthorized: u64 = 2;
-/// Every plugin authorization must be revoked before the capability can be withdrawn.
 const EPluginsRemain: u64 = 3;
-/// The Vault does not currently hold its capability.
 const EVaultEmpty: u64 = 4;
-/// Only the exact capability used to derive this Vault may be restored.
 const EWrongCapability: u64 = 5;
 
 // === Structs ===
 
-/// The singleton namespace from which every Vault ID is derived.
 public struct VaultRegistry has key {
     id: UID,
 }
 
-/// Custodies one capability and the typed authorization records for plugins.
-///
-/// `Vault` intentionally lacks `store`: only this module can share it, and no
-/// production API can delete it. `vaulted_cap_id` permanently binds the shell to the
-/// exact capability from which its ID was derived. An empty Vault can only be
-/// restored with that same capability object.
 public struct Vault<Cap: key + store> has key {
     id: UID,
     vaulted_cap_id: ID,
@@ -51,24 +30,15 @@ public struct Vault<Cap: key + store> has key {
     authorized_plugins: Bag,
 }
 
-/// Authorizes administration and direct administrative borrowing for one vault.
-/// Custody and transfer policy can be composed outside this module.
 public struct VaultAdminCap<phantom Cap: key + store> has key, store {
     id: UID,
     vault_id: ID,
 }
 
-/// Derives one canonical Vault for an exact capability object.
 public struct VaultKey<phantom Cap: key + store>(ID) has copy, drop, store;
 
-/// Derives the canonical administrator capability from its Vault.
 public struct VaultAdminCapKey() has copy, drop, store;
 
-/// The typed key for a plugin authorization record.
-///
-/// Its fields are private, so only this module can create a key. `Witness` is
-/// phantom: every witness type produces a distinct dynamic-field name without
-/// storing a witness value.
 public struct AuthorizedPluginKey<phantom Witness: drop>() has copy, drop, store;
 
 // === Events ===
@@ -135,8 +105,6 @@ fun init(ctx: &mut TxContext) {
     });
 }
 
-/// Custody `vaulted_cap` in its canonical permanent Vault and create the canonical
-/// vault-specific administrator capability.
 public fun new<Cap: key + store>(
     registry: &mut VaultRegistry,
     vaulted_cap: Cap,
@@ -175,13 +143,10 @@ public fun new<Cap: key + store>(
     (vault, cap)
 }
 
-/// Share a newly-created vault.
 public fun share<Cap: key + store>(self: Vault<Cap>) {
     transfer::share_object(self);
 }
 
-/// Withdraw the exact capability while leaving its canonical Vault and
-/// VaultAdminCap intact. Every plugin must be revoked first.
 public fun withdraw_vaulted_cap<Cap: key + store>(
     self: &mut Vault<Cap>,
     cap: &VaultAdminCap<Cap>,
@@ -200,8 +165,6 @@ public fun withdraw_vaulted_cap<Cap: key + store>(
     vaulted_cap
 }
 
-/// Restore the exact capability used to derive this permanent Vault.
-/// Restoring always starts from a clean plugin-authorization slate.
 public fun restore_vaulted_cap<Cap: key + store>(
     self: &mut Vault<Cap>,
     cap: &VaultAdminCap<Cap>,
@@ -223,7 +186,6 @@ public fun restore_vaulted_cap<Cap: key + store>(
 
 // === Plugin authorization ===
 
-/// Authorize the plugin identified by this witness type.
 public fun authorize_plugin<Cap: key + store, Witness: drop>(
     self: &mut Vault<Cap>,
     cap: &VaultAdminCap<Cap>,
@@ -251,7 +213,6 @@ public fun authorize_plugin<Cap: key + store, Witness: drop>(
     });
 }
 
-/// Revoke a plugin authorization without requiring cooperation from the plugin.
 public fun revoke_plugin<Cap: key + store, Witness: drop>(
     self: &mut Vault<Cap>,
     cap: &VaultAdminCap<Cap>,
@@ -275,10 +236,6 @@ public fun revoke_plugin<Cap: key + store, Witness: drop>(
 
 // === Capability borrowing ===
 
-/// Temporarily lend the full custodied capability to an authorized plugin.
-///
-/// `Borrow` has no abilities, so the exact capability must be returned through
-/// `put_back` in this transaction.
 public fun borrow_as_plugin<Cap: key + store, Witness: drop>(
     self: &mut Vault<Cap>,
     _: Witness,
@@ -295,7 +252,6 @@ public fun borrow_as_plugin<Cap: key + store, Witness: drop>(
     (vaulted_cap, receipt)
 }
 
-/// Temporarily lend the full custodied capability to the vault administrator.
 public fun borrow_as_admin<Cap: key + store>(
     self: &mut Vault<Cap>,
     cap: &VaultAdminCap<Cap>,
@@ -305,10 +261,6 @@ public fun borrow_as_admin<Cap: key + store>(
     (vaulted_cap, receipt)
 }
 
-/// Return the exact capability borrowed from this vault.
-///
-/// No additional authorization is required: `Borrow` proves the originating
-/// referent and capability object ID, and blocking return would harm liveness.
 public fun put_back<Cap: key + store>(
     self: &mut Vault<Cap>,
     vaulted_cap: Cap,
@@ -319,30 +271,22 @@ public fun put_back<Cap: key + store>(
 
 // === Views ===
 
-/// Derive the canonical Vault address for `vaulted_cap_id` in this registry.
 public fun derived_address<Cap: key + store>(registry: &VaultRegistry, vaulted_cap_id: ID): address {
     derived_object::derive_address(object::id(registry), VaultKey<Cap>(vaulted_cap_id))
 }
 
-/// The exact capability object permanently assigned to this Vault.
 public fun vaulted_cap_id<Cap: key + store>(self: &Vault<Cap>): ID {
     self.vaulted_cap_id
 }
 
-/// Whether this Vault is active.
-///
-/// An active Vault has an outer Referent. It remains active during a
-/// transaction-local lease even though that Referent is temporarily empty.
 public fun is_active<Cap: key + store>(self: &Vault<Cap>): bool {
     self.vaulted_cap.is_some()
 }
 
-/// The immutable Bag containing typed plugin-authorization records.
 public fun authorized_plugins<Cap: key + store>(self: &Vault<Cap>): &Bag {
     &self.authorized_plugins
 }
 
-/// Returns whether this witness type has an authorization record.
 public fun is_plugin_authorized<Cap: key + store, Witness: drop>(self: &Vault<Cap>): bool {
     bag::contains(&self.authorized_plugins, AuthorizedPluginKey<Witness>())
 }

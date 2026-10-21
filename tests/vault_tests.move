@@ -108,7 +108,6 @@ fun full_state_machine_cycle_preserves_exact_capability() {
     let vault_id = object::id(&vault);
     let admin_id = object::id(&cap);
     let plugins_id = object::id(vault.authorized_plugins());
-    // P(0) -> P(1) -> B(1) -> P(1) -> P(0) -> E -> P(0) -> B(0) -> P(0).
     assert!(vault.is_active());
     assert_eq!(bag::length(vault.authorized_plugins()), 0);
     authorize(&mut vault, &cap);
