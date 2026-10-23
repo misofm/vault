@@ -3,6 +3,8 @@
 
 module vault::vault;
 
+// === Imports ===
+
 use sui::bag::{Self, Bag};
 use sui::borrow::{Self, Borrow, Referent};
 use sui::derived_object;
@@ -59,6 +61,22 @@ public struct VaultCreatedEvent<phantom Cap> has copy, drop {
     capability_available: bool,
 }
 
+public struct VaultCapabilityWithdrawnEvent<phantom Cap> has copy, drop {
+    vault_id: address,
+    vaulted_cap_id: address,
+    cap_id: address,
+    active: bool,
+    capability_available: bool,
+}
+
+public struct VaultCapabilityRestoredEvent<phantom Cap> has copy, drop {
+    vault_id: address,
+    vaulted_cap_id: address,
+    cap_id: address,
+    active: bool,
+    capability_available: bool,
+}
+
 public struct PluginAuthorizedEvent<phantom Cap, phantom Witness> has copy, drop {
     vault_id: address,
     vaulted_cap_id: address,
@@ -77,23 +95,7 @@ public struct PluginRevokedEvent<phantom Cap, phantom Witness> has copy, drop {
     authorized: bool,
 }
 
-public struct VaultCapabilityWithdrawnEvent<phantom Cap> has copy, drop {
-    vault_id: address,
-    vaulted_cap_id: address,
-    cap_id: address,
-    active: bool,
-    capability_available: bool,
-}
-
-public struct VaultCapabilityRestoredEvent<phantom Cap> has copy, drop {
-    vault_id: address,
-    vaulted_cap_id: address,
-    cap_id: address,
-    active: bool,
-    capability_available: bool,
-}
-
-// === Lifecycle ===
+// === Public Functions ===
 
 fun init(ctx: &mut TxContext) {
     let registry = VaultRegistry { id: object::new(ctx) };
@@ -147,6 +149,54 @@ public fun share<Cap: key + store>(self: Vault<Cap>) {
     transfer::share_object(self);
 }
 
+public fun borrow_as_plugin<Cap: key + store, Witness: drop>(
+    self: &mut Vault<Cap>,
+    _: Witness,
+): (Cap, Borrow) {
+    assert!(
+        bag::contains(&self.authorized_plugins, AuthorizedPluginKey<Witness>()),
+        EPluginNotAuthorized,
+    );
+    let _: &bool = bag::borrow(
+        &self.authorized_plugins,
+        AuthorizedPluginKey<Witness>(),
+    );
+    let (vaulted_cap, receipt) = self.vaulted_cap.borrow_mut().borrow();
+    (vaulted_cap, receipt)
+}
+
+public fun put_back<Cap: key + store>(
+    self: &mut Vault<Cap>,
+    vaulted_cap: Cap,
+    receipt: Borrow,
+) {
+    self.vaulted_cap.borrow_mut().put_back(vaulted_cap, receipt);
+}
+
+// === View Functions ===
+
+public fun derive_address<Cap: key + store>(registry: &VaultRegistry, vaulted_cap_id: ID): address {
+    derived_object::derive_address(object::id(registry), VaultKey<Cap>(vaulted_cap_id))
+}
+
+public fun vaulted_cap_id<Cap: key + store>(self: &Vault<Cap>): ID {
+    self.vaulted_cap_id
+}
+
+public fun is_active<Cap: key + store>(self: &Vault<Cap>): bool {
+    self.vaulted_cap.is_some()
+}
+
+public fun authorized_plugins<Cap: key + store>(self: &Vault<Cap>): &Bag {
+    &self.authorized_plugins
+}
+
+public fun is_plugin_authorized<Cap: key + store, Witness: drop>(self: &Vault<Cap>): bool {
+    bag::contains(&self.authorized_plugins, AuthorizedPluginKey<Witness>())
+}
+
+// === Admin Functions ===
+
 public fun withdraw_vaulted_cap<Cap: key + store>(
     self: &mut Vault<Cap>,
     cap: &VaultAdminCap<Cap>,
@@ -183,8 +233,6 @@ public fun restore_vaulted_cap<Cap: key + store>(
         capability_available: true,
     });
 }
-
-// === Plugin authorization ===
 
 public fun authorize_plugin<Cap: key + store, Witness: drop>(
     self: &mut Vault<Cap>,
@@ -234,24 +282,6 @@ public fun revoke_plugin<Cap: key + store, Witness: drop>(
     });
 }
 
-// === Capability borrowing ===
-
-public fun borrow_as_plugin<Cap: key + store, Witness: drop>(
-    self: &mut Vault<Cap>,
-    _: Witness,
-): (Cap, Borrow) {
-    assert!(
-        bag::contains(&self.authorized_plugins, AuthorizedPluginKey<Witness>()),
-        EPluginNotAuthorized,
-    );
-    let _: &bool = bag::borrow(
-        &self.authorized_plugins,
-        AuthorizedPluginKey<Witness>(),
-    );
-    let (vaulted_cap, receipt) = self.vaulted_cap.borrow_mut().borrow();
-    (vaulted_cap, receipt)
-}
-
 public fun borrow_as_admin<Cap: key + store>(
     self: &mut Vault<Cap>,
     cap: &VaultAdminCap<Cap>,
@@ -261,37 +291,7 @@ public fun borrow_as_admin<Cap: key + store>(
     (vaulted_cap, receipt)
 }
 
-public fun put_back<Cap: key + store>(
-    self: &mut Vault<Cap>,
-    vaulted_cap: Cap,
-    receipt: Borrow,
-) {
-    self.vaulted_cap.borrow_mut().put_back(vaulted_cap, receipt);
-}
-
-// === Views ===
-
-public fun derive_address<Cap: key + store>(registry: &VaultRegistry, vaulted_cap_id: ID): address {
-    derived_object::derive_address(object::id(registry), VaultKey<Cap>(vaulted_cap_id))
-}
-
-public fun vaulted_cap_id<Cap: key + store>(self: &Vault<Cap>): ID {
-    self.vaulted_cap_id
-}
-
-public fun is_active<Cap: key + store>(self: &Vault<Cap>): bool {
-    self.vaulted_cap.is_some()
-}
-
-public fun authorized_plugins<Cap: key + store>(self: &Vault<Cap>): &Bag {
-    &self.authorized_plugins
-}
-
-public fun is_plugin_authorized<Cap: key + store, Witness: drop>(self: &Vault<Cap>): bool {
-    bag::contains(&self.authorized_plugins, AuthorizedPluginKey<Witness>())
-}
-
-// === Private helpers ===
+// === Private Functions ===
 
 fun assert_admin<Cap: key + store>(
     self: &Vault<Cap>,
@@ -299,6 +299,8 @@ fun assert_admin<Cap: key + store>(
 ) {
     assert!(object::id(self) == cap.vault_id, ENotVaultAdmin)
 }
+
+// === Test Functions ===
 
 #[test_only]
 public fun new_registry_for_testing(ctx: &mut TxContext): VaultRegistry {
