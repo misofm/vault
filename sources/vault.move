@@ -271,7 +271,7 @@ public fun put_back<Cap: key + store>(
 
 // === Views ===
 
-public fun derived_address<Cap: key + store>(registry: &VaultRegistry, vaulted_cap_id: ID): address {
+public fun derive_address<Cap: key + store>(registry: &VaultRegistry, vaulted_cap_id: ID): address {
     derived_object::derive_address(object::id(registry), VaultKey<Cap>(vaulted_cap_id))
 }
 

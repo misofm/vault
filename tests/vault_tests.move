@@ -80,11 +80,11 @@ fun ids_are_deterministic_and_type_separated() {
     let mut registry = vault::new_registry_for_testing(ctx);
     let vaulted_cap = new_test_cap(ctx);
     let vaulted_cap_id = object::id(&vaulted_cap);
-    let expected_vault = vault::derived_address<TestCap>(&registry, vaulted_cap_id);
+    let expected_vault = vault::derive_address<TestCap>(&registry, vaulted_cap_id);
     let expected_cap = vault::cap_address_for_testing(expected_vault.to_id());
-    let other_type_vault = vault::derived_address<OtherCap>(&registry, vaulted_cap_id);
+    let other_type_vault = vault::derive_address<OtherCap>(&registry, vaulted_cap_id);
     let second_vaulted_cap = new_test_cap(ctx);
-    let second_cap_vault = vault::derived_address<TestCap>(&registry, object::id(&second_vaulted_cap));
+    let second_cap_vault = vault::derive_address<TestCap>(&registry, object::id(&second_vaulted_cap));
 
     let (vault, cap) = vault::new(&mut registry, vaulted_cap, ctx);
 
@@ -324,7 +324,7 @@ fun lifecycle_events_identify_the_derived_objects() {
     let expected_registry = object::id(&registry).to_address();
     let vaulted_cap = new_test_cap(ctx);
     let vaulted_cap_id = object::id(&vaulted_cap);
-    let expected_vault = vault::derived_address<TestCap>(&registry, vaulted_cap_id);
+    let expected_vault = vault::derive_address<TestCap>(&registry, vaulted_cap_id);
     let expected_vaulted_cap = vaulted_cap_id.to_address();
     let (mut vault, cap) = vault::new(&mut registry, vaulted_cap, ctx);
     let expected_cap = object::id(&cap).to_address();
@@ -398,7 +398,7 @@ fun lifecycle_events_identify_the_derived_objects() {
     assert_eq!(restored_admin, expected_cap);
     assert!(restored_active);
     assert!(restored_available);
-    let _ = vault::derived_address<TestCap>(&registry, vaulted_cap_id);
+    let _ = vault::derive_address<TestCap>(&registry, vaulted_cap_id);
     let _ = vault.vaulted_cap_id();
     let _ = vault.is_active();
     let _ = vault.authorized_plugins();
