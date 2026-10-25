@@ -147,4 +147,4 @@ sui move test --build-env testnet
 
 ## License
 
-[Apache-2.0](./LICENSE)
+[Functional Source License 1.1, ALv2 Future License](./LICENSE.md)
