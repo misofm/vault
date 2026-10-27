@@ -123,14 +123,12 @@ public fun new<Cap: key + store>(
         id: derived_object::claim(&mut vault_id, VaultAdminCapKey()),
         vault_id: vault_id_value,
     };
-
     let vault = Vault {
         id: vault_id,
         vaulted_cap_id,
         vaulted_cap: option::some(borrow::new(vaulted_cap, ctx)),
         authorized_plugins: bag::new(ctx),
     };
-
     emit(VaultCreatedEvent<Cap> {
         registry_id,
         vault_id: vault_id_value.to_address(),
@@ -141,7 +139,6 @@ public fun new<Cap: key + store>(
         active: true,
         capability_available: true,
     });
-
     (vault, cap)
 }
 
