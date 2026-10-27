@@ -200,7 +200,6 @@ public fun withdraw_vaulted_cap<Cap: key + store>(
 ): Cap {
     self.assert_admin(cap);
     assert!(bag::is_empty(&self.authorized_plugins), EPluginsRemain);
-
     let vaulted_cap = self.vaulted_cap.extract().destroy();
     emit(VaultCapabilityWithdrawnEvent<Cap> {
         vault_id: object::id(self).to_address(),
@@ -220,7 +219,6 @@ public fun restore_vaulted_cap<Cap: key + store>(
 ) {
     self.assert_admin(cap);
     assert!(object::id(&vaulted_cap) == self.vaulted_cap_id, EWrongCapability);
-
     self.vaulted_cap.fill(borrow::new(vaulted_cap, ctx));
     emit(VaultCapabilityRestoredEvent<Cap> {
         vault_id: object::id(self).to_address(),
