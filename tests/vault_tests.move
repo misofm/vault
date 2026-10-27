@@ -85,6 +85,7 @@ fun ids_are_deterministic_and_type_separated() {
     let other_type_vault = vault::derive_address<OtherCap>(&registry, vaulted_cap_id);
     let second_vaulted_cap = new_test_cap(ctx);
     let second_cap_vault = vault::derive_address<TestCap>(&registry, object::id(&second_vaulted_cap));
+
     let (vault, cap) = vault::new(&mut registry, vaulted_cap, ctx);
 
     assert_eq!(object::id(&vault).to_address(), expected_vault);
@@ -191,6 +192,7 @@ fun registry_and_vault_are_shared_across_transactions() {
     vault.restore_vaulted_cap(&cap, vaulted_cap, scenario.ctx());
     test_scenario::return_shared(vault);
     scenario.return_to_sender(cap);
+
     scenario.end();
 }
 
