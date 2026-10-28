@@ -1,3 +1,5 @@
+> **Moved.** This repository is archived. Its packages now live in [`misofm/framework`](https://github.com/misofm/framework/tree/main/lib/vault) under `lib/vault/`.
+
 # Vault
 
 Vault is a generic Sui Move primitive for permanent, discoverable capability
